@@ -5,7 +5,12 @@
 set -euo pipefail
 target=${1:-}
 dir="/var/lib/omarchy-greeter/$(id -un)"
-if [[ -n $target && $target =~ ^[a-z_][a-z0-9_-]*$ && -w $dir ]]; then
+# A plain switch clears any earlier choice, so it is never replayed.
+[[ -n $target && $target =~ ^[a-z_][a-z0-9_-]*$ ]] || target=""
+if [[ -w $dir ]]; then
+  if [[ -z $target ]]; then rm -f "$dir/switch-to"; fi
+fi
+if [[ -n $target && -w $dir ]]; then
   printf '%s %s\n' "$(date +%s)" "$target" > "$dir/.switch-to.tmp"
   chmod 644 "$dir/.switch-to.tmp"
   mv -f "$dir/.switch-to.tmp" "$dir/switch-to"

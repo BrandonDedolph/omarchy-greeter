@@ -1,0 +1,25 @@
+#!/bin/bash
+# Safety net for "a session out of sight is always locked", independent of
+# which lock screen is in use (the improved one, or the built-in one after an
+# update the patch did not fit). Whenever this session goes to the background
+# unlocked, asks the Omarchy lock to lock, retrying until it reports locked or
+# the session is in front again.
+set -uo pipefail
+
+locked() { [[ $(omarchy-shell lock isLocked 2>/dev/null) == true ]]; }
+
+while true; do
+  while IFS= read -r event; do
+    [[ $event == inactive ]] || continue
+    for _ in $(seq 1 30); do
+      locked && break
+      omarchy-shell lock lock >/dev/null 2>&1
+      sleep 1
+      # Back in front before the lock took? Then the user is here.
+      [[ $(busctl --system get-property org.freedesktop.login1 /org/freedesktop/login1/session/auto \
+        org.freedesktop.login1.Session Active 2>/dev/null) == "b true" ]] && break
+    done
+    locked || logger -t omarchy-greeter "could not lock a session that went to the background"
+  done < <(omarchy-greeter-session-watch --observe)
+  sleep 2
+done

@@ -6,6 +6,10 @@
 #   lock / unlock       logind asked the session to lock / unlock: SDDM sends
 #                       unlock when you log back into this session from the
 #                       login screen; `loginctl lock-session` sends lock.
+#                       An unlock is also kept for 15 s in
+#                       $XDG_RUNTIME_DIR/omarchy-greeter-unlock and announced
+#                       again by the next watcher, so a shell restart in
+#                       between does not lose it.
 # Only logind can send these (the monitor only accepts signals from
 # org.freedesktop.login1), and logind only does so for this account itself
 # or an admin who authenticated.
@@ -31,6 +35,15 @@ trap 'kill "$monitor_pid" 2>/dev/null' EXIT
 trap 'exit 0' TERM INT HUP PIPE
 state
 
+memo="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-greeter-unlock"
+# --observe: just report (the guard); only the lock screen keeps the memo.
+[[ ${1:-} == --observe ]] && memo=""
+if [[ -n $memo && -f $memo ]]; then
+  stamp=$(<"$memo")
+  rm -f "$memo"
+  [[ $stamp =~ ^[0-9]+$ ]] && (( $(date +%s) - stamp <= 15 )) && echo unlock
+fi
+
 while true; do
   IFS= read -r -t 15 line <&"${MONITOR[0]}"
   rc=$?
@@ -40,8 +53,8 @@ while true; do
     continue
   fi
   case $line in
-    *"org.freedesktop.login1.Session.Unlock ("*) echo unlock ;;
-    *"org.freedesktop.login1.Session.Lock ("*) echo lock ;;
+    *"org.freedesktop.login1.Session.Unlock ("*) [[ -n $memo ]] && date +%s > "$memo"; echo unlock ;;
+    *"org.freedesktop.login1.Session.Lock ("*) [[ -n $memo ]] && rm -f "$memo"; echo lock ;;
     *"PropertiesChanged"*"'Active': <true>"*) echo active ;;
     *"PropertiesChanged"*"'Active': <false>"*) echo inactive ;;
   esac

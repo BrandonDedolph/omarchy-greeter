@@ -14,11 +14,23 @@ set -uo pipefail
 
 FLAG_DIR=/run/omarchy-greeter
 FLAG=$FLAG_DIR/boot-unlocked
+# Written the first time this runs on a boot; never re-arm while it exists.
+DONE=$FLAG_DIR/boot-unlock-armed
 WINDOW=600
 
 log() { echo "boot-unlock: $*"; }
 
 rm -f "$FLAG"
+
+# Once per kernel boot. A soft-reboot (systemctl soft-reboot) restarts
+# userspace without the disk password, keeping the kernel, its uptime and
+# possibly /run, so check both.
+boot_id=$(</proc/sys/kernel/random/boot_id)
+if [[ -e $DONE ]]; then log "already armed once on this boot"; exit 0; fi
+soft=$(systemctl show -p SoftRebootsCount --value 2>/dev/null)
+[[ $soft == 0 ]] || { log "soft-reboot detected (${soft:-unknown}); not a fresh boot"; exit 0; }
+install -d -m 755 -o root -g root "$FLAG_DIR"
+echo "$boot_id" > "$DONE"
 
 conf_value() { sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]#]*).*/\1/p" /etc/omarchy-greeter.conf 2>/dev/null | tail -n1; }
 [[ $(conf_value boot_unlock) == yes ]] || { log "disabled in /etc/omarchy-greeter.conf"; exit 0; }
@@ -29,6 +41,13 @@ uptime=$(cut -d. -f1 /proc/uptime)
 cmdline=$(</proc/cmdline)
 if [[ $cmdline == *cryptkey=* || $cmdline == *rd.luks.key=* ]]; then
   log "disk unlocks with a key file"; exit 0
+fi
+# A key file built into the initramfs unlocks without a typed password too.
+if [[ -e /etc/crypttab.initramfs ]] && awk '!/^[[:space:]]*(#|$)/ && $3 != "" && $3 != "none" && $3 != "-" {found=1} END{exit !found}' /etc/crypttab.initramfs; then
+  log "/etc/crypttab.initramfs names a key file"; exit 0
+fi
+if cat /etc/mkinitcpio.conf /etc/mkinitcpio.conf.d/*.conf 2>/dev/null | grep -qE '^[[:space:]]*FILES(\+)?=\([^)]*[^[:space:])]'; then
+  log "the initramfs bundles extra files (FILES=), possibly a key file"; exit 0
 fi
 
 source=$(findmnt -no SOURCE / | sed 's/\[.*//')

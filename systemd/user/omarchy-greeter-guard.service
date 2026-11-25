@@ -1,0 +1,12 @@
+[Unit]
+Description=Lock this session whenever it goes to the background
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/omarchy-greeter-guard
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

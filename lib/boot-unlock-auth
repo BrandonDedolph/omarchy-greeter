@@ -16,8 +16,18 @@ uid=$(id -u "$PAM_USER" 2>/dev/null) || exit 1
 
 # Only for starting a new session. Returning to a running (locked) session
 # always takes that account's password.
-sessions=$(loginctl show-user "$PAM_USER" --property=Sessions --value 2>/dev/null)
-[[ -z ${sessions// /} ]] || exit 1
+# Read straight from logind's state files, failing closed: anything that
+# cannot be read counts as a running session. Only the per-user service
+# manager's own session (class manager) does not count.
+[[ -d /run/systemd/users ]] || exit 1
+if [[ -e /run/systemd/users/$uid ]]; then
+  sessions=$(sed -n 's/^SESSIONS=//p' "/run/systemd/users/$uid" 2>/dev/null) || exit 1
+  for sid in $sessions; do
+    [[ $sid =~ ^[0-9a-zA-Z]+$ ]] || exit 1
+    class=$(sed -n 's/^CLASS=//p' "/run/systemd/sessions/$sid" 2>/dev/null) || exit 1
+    [[ $class == manager* ]] || exit 1
+  done
+fi
 
 # One login only: whoever claims the mark first.
 rm "$FLAG" 2>/dev/null || exit 1

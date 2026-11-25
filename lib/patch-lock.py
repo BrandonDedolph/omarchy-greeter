@@ -29,6 +29,27 @@ def rep(name, old, new):
 
 # ---------------------------------------------------------------- Service.qml
 
+# A lock out of sight (another console is in front) must not unlock (only a
+# deferred logind unlock may, once back in front), hold the fingerprint
+# reader or switch hardware off.
+rep("Service.qml", '''  function finishUnlock() {
+    if (!root.currentlyLocked()) return
+''', '''  function finishUnlock() {
+    if (!root.currentlyLocked()) return
+    if (!root.sessionActive) {
+      logEvent("unlock refused: session in the background")
+      return
+    }
+''')
+rep("Service.qml", '''  function runBlank() {
+''', '''  function runBlank() {
+    if (!root.sessionActive) return
+''')
+rep("Service.qml", '''  function startFingerprint() {
+    if (!lockRequested ''', '''  function startFingerprint() {
+    if (!root.sessionActive) return
+    if (!lockRequested ''')
+
 rep("Service.qml", '''  property string pendingPassword: ""
 ''', '''  property string pendingPassword: ""
 
@@ -102,39 +123,79 @@ rep("Service.qml", '''  property string pendingPassword: ""
   //    again, so the unlock is drawn live instead of leaving a stale frame;
   //  - logind "lock" (loginctl lock-session) locks.
   property bool sessionActive: true
-  property bool pendingLogindUnlock: false
+  // A logind unlock waits for the session to come back to the front, for at
+  // most this long; omarchy-greeter-session-watch also keeps it across a
+  // shell restart (it re-announces a recent one at start).
+  readonly property int logindUnlockWindowMs: 15000
+  property real pendingLogindUnlockAt: 0
+  readonly property real shellStartedAt: Date.now()
+
+  function logindUnlockPending() {
+    return root.pendingLogindUnlockAt > 0 && Date.now() - root.pendingLogindUnlockAt < root.logindUnlockWindowMs
+  }
 
   function handleSessionEvent(event) {
     if (event === "active") {
       root.sessionActive = true
-      if (root.pendingLogindUnlock) logindUnlockTimer.restart()
+      if (root.lockRequested && root.fingerprintConfigured) {
+        root.resumeFingerprint()
+        Qt.callLater(root.startFingerprint)
+      }
+      if (root.logindUnlockPending()) logindUnlockTimer.restart()
     } else if (event === "inactive") {
       root.sessionActive = false
-      if (!root.currentlyLocked() && !root.lockRequested) {
-        root.logEvent("lock: session went to the background")
-        Quickshell.execDetached(["omarchy-system-lock"])
+      // Nobody can use a reader for a hidden lock; free it for the session
+      // in front.
+      root.pauseFingerprint()
+      if (fingerprintPam.active) {
+        // abort() delivers no completion signal; close the attempt here.
+        fingerprintPam.abort()
+        root.settleFingerprintAttempt()
       }
+      backgroundLockTimer.restart()
     } else if (event === "lock") {
-      root.pendingLogindUnlock = false
+      root.pendingLogindUnlockAt = 0
       if (!root.currentlyLocked() && !root.lockRequested) {
         root.logEvent("lock: logind")
-        Quickshell.execDetached(["omarchy-system-lock"])
+        root.beginLock()
       }
     } else if (event === "unlock") {
-      if (!root.lockRequested) return
-      root.pendingLogindUnlock = true
+      root.pendingLogindUnlockAt = Date.now()
       if (root.sessionActive) logindUnlockTimer.restart()
     }
   }
 
+  // A session out of sight is always locked. Checked every second rather
+  // than once, so a lock that fails to start is retried.
+  Timer {
+    id: backgroundLockTimer
+    interval: 1000
+    repeat: true
+    triggeredOnStart: true
+    running: false
+    onTriggered: {
+      if (root.sessionActive) { stop(); return }
+      if (root.currentlyLocked() || root.lockRequested) return
+      root.logEvent("lock: session went to the background")
+      root.beginLock()
+    }
+  }
+
   // A short wait after coming to the front lets the compositor take the
-  // displays back before the lock goes away.
+  // displays back before the lock goes away. Right after a shell restart the
+  // lock may still be coming back, so a pending unlock is held until it is.
   Timer {
     id: logindUnlockTimer
     interval: 250
     onTriggered: {
-      if (!root.pendingLogindUnlock || !root.sessionActive) return
-      root.pendingLogindUnlock = false
+      if (!root.logindUnlockPending() || !root.sessionActive) return
+      if (!root.lockRequested && !root.currentlyLocked()) {
+        if (Date.now() - root.shellStartedAt < root.logindUnlockWindowMs) restart()
+        return
+      }
+      root.pendingLogindUnlockAt = 0
+      // Used up: a later shell restart must not replay it.
+      Quickshell.execDetached(["sh", "-c", 'rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-greeter-unlock"'])
       root.logEvent("logind-unlock")
       root.finishUnlock()
     }
@@ -146,7 +207,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   onLockedForHintChanged: Quickshell.execDetached(["busctl", "--system", "call", "org.freedesktop.login1",
     "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", root.lockedForHint ? "true" : "false"])
   // A password unlock clears any logind unlock still waiting.
-  onLockRequestedChanged: if (!root.lockRequested) root.pendingLogindUnlock = false
+  onLockRequestedChanged: if (!root.lockRequested) root.pendingLogindUnlockAt = 0
 
   Process {
     id: sessionWatch
@@ -159,7 +220,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   }
   Timer {
     id: sessionWatchRestart
-    interval: 5000
+    interval: 1000
     onTriggered: sessionWatch.running = true
   }
 ''')
@@ -185,6 +246,7 @@ rep("Service.qml", '''      color: Commons.Color.background
         id: lockView
         anchors.fill: parent
         opacity: root.isPrimaryOutput(lockSurface.screen) ? 1 : 0
+        extrasEnabled: root.isPrimaryOutput(lockSurface.screen)
         currentUser: root.currentUserInfo
         otherUsers: root.otherUsers
         avatarPath: root.avatarPath
@@ -212,6 +274,9 @@ rep("LockView.qml", '''  signal wakeRequested()
   property var otherUsers: []
   property string avatarPath: ""
   signal switchUserRequested(string name)
+  // Off on black monitors, where the form is invisible but typing still
+  // reaches the password field: the hidden buttons must not be clickable.
+  property bool extrasEnabled: true
 
   readonly property string displayName: currentUser && (currentUser.realName || currentUser.name) ? (currentUser.realName || currentUser.name) : ""
 
@@ -225,6 +290,7 @@ rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who 
 ''', '''    // Signed in as: avatar and name above the password field.
     Column {
       id: identity
+      enabled: root.extrasEnabled
       visible: root.displayName !== ""
       anchors.bottom: inputField.top
       anchors.bottomMargin: 32
@@ -310,6 +376,8 @@ rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who 
     // Other accounts signed in, and switching to the login screen.
     Row {
       id: switchRow
+      enabled: root.extrasEnabled
+      visible: root.extrasEnabled
       anchors.top: inputField.bottom
       anchors.topMargin: root.fingerprintConfigured && root.fingerprintUnavailable ? 72 : 28
       anchors.horizontalCenter: inputField.horizontalCenter

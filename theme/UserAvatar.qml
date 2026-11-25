@@ -34,6 +34,7 @@ Item {
       anchors.centerIn: parent
       visible: !avatar.hasImage
       text: avatar.initials(avatar.label)
+      textFormat: Text.PlainText
       color: avatar.ink
       font.family: avatar.fontFamily
       font.pixelSize: avatar.height * 0.36

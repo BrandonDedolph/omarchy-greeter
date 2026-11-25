@@ -45,8 +45,12 @@ local function apply_user_monitors(user)
   if not file then return end
   for line in file:lines() do
     local name, mode, position, scale = line:match("^([%w._-]+) (%d+x%d+@[%d.]+) (%-?%d+x%-?%d+) ([%d.]+)$")
-    if name then
-      hl.monitor({ output = name, mode = mode, position = position, scale = tonumber(scale) })
+    local s = tonumber(scale)
+    local w, h = (mode or ""):match("^(%d+)x(%d+)")
+    w, h = tonumber(w), tonumber(h)
+    -- Written by the account; only plausible values are applied.
+    if name and s and s >= 0.5 and s <= 4 and w and h and w >= 640 and h >= 480 and w <= 15360 and h <= 8640 then
+      hl.monitor({ output = name, mode = mode, position = position, scale = s })
     end
   end
   file:close()

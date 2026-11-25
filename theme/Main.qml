@@ -74,9 +74,10 @@ Rectangle {
       // Unknown connector: use any of the user's scales.
       for (var k in m) { s = scaleOf(m[k]); break }
     }
-    return s > 0 ? s : Screen.devicePixelRatio
+    // Clamped: these come from files each account writes.
+    return s > 0 ? Math.min(Math.max(s, 0.5), 4) : Screen.devicePixelRatio
   }
-  readonly property real fontBase: Number(display.fontBaseSize) > 0 ? Number(display.fontBaseSize) : 12
+  readonly property real fontBase: Number(display.fontBaseSize) > 0 ? Math.min(Math.max(Number(display.fontBaseSize), 7), 24) : 12
   property real ui: userScale / Math.max(Screen.devicePixelRatio, 0.5) * fontBase / 12
   Behavior on ui { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
   readonly property string fontFamily: display.fontFamily ? String(display.fontFamily) : "JetBrainsMono Nerd Font"
@@ -102,6 +103,7 @@ Rectangle {
   }
 
   property string requestedUser: ""
+  property real requestedStamp: 0
   function applyRequestedUser() {
     if (!requestedUser) return
     for (var i = 0; i < users.length; i++) {
@@ -236,12 +238,17 @@ Rectangle {
     readText(dir + "theme.name", function(text) { setLook(name, "theme", text.trim()) })
     readSession(name)
     // A lock screen's "Switch user" names the account to preselect.
+    // Only a request made just before this login screen opened counts, and
+    // the newest one wins (several accounts may have left one).
     readText(dir + "switch-to", function(text) {
       var parts = text.trim().split(" ")
-      if (parts.length === 2 && Date.now() / 1000 - Number(parts[0]) < 120) {
-        root.requestedUser = parts[1]
-        root.applyRequestedUser()
-      }
+      var stamp = Number(parts[0])
+      if (parts.length !== 2 || !(stamp > 0)) return
+      if (stamp < root.startedAt / 1000 - 15 || stamp > Date.now() / 1000 + 2) return
+      if (stamp <= root.requestedStamp) return
+      root.requestedStamp = stamp
+      root.requestedUser = parts[1]
+      root.applyRequestedUser()
     })
     readText(dir + "video", function(text) {
       var file = text.trim()
@@ -282,12 +289,19 @@ Rectangle {
   property bool capsGuess: false
   readonly property bool capsOn: (typeof keyboard !== "undefined" && keyboard && keyboard.capsLock) || capsGuess
 
+  // The Omarchy session (uwsm), which runs the per-user services this
+  // login screen and the lock rely on. SDDM's session list answers its own
+  // roles only: FileRole = Qt.UserRole + 2, ExecRole = Qt.UserRole + 5.
   property int sessionIndex: {
+    var fallback = -1
     for (var i = 0; i < sessionModel.rowCount(); i++) {
-      var label = String(sessionModel.data(sessionModel.index(i, 0), Qt.DisplayRole) || "")
-      if (label.indexOf("uwsm") !== -1) return i
+      var index = sessionModel.index(i, 0)
+      var file = String(sessionModel.data(index, Qt.UserRole + 2) || "")
+      var exec = String(sessionModel.data(index, Qt.UserRole + 5) || "")
+      if (/(^|\/)omarchy\.desktop$/.test(file)) return i
+      if (fallback < 0 && (file.indexOf("uwsm") !== -1 || exec.indexOf("uwsm") !== -1)) fallback = i
     }
-    return sessionModel.lastIndex
+    return fallback >= 0 ? fallback : sessionModel.lastIndex
   }
 
   function login() {
@@ -466,6 +480,7 @@ Rectangle {
       Text {
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.user ? (root.user.realName || root.user.name) : ""
+        textFormat: Text.PlainText
         color: root.cBright
         font.family: root.fontFamily
         font.pixelSize: 26 * root.ui
@@ -475,6 +490,7 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         visible: !!root.user && !!root.user.realName && root.user.realName !== root.user.name
         text: root.user ? root.user.name : ""
+        textFormat: Text.PlainText
         color: root.cForeground
         font.family: root.fontFamily
         font.pixelSize: 15 * root.ui
@@ -743,6 +759,7 @@ Rectangle {
     anchors.left: parent.left
     anchors.bottom: parent.bottom
     anchors.margins: 28 * root.ui
+    textFormat: Text.PlainText
     text: "  " + sddm.hostName + (root.look && root.look.theme ? "     " + root.look.theme : "")
     color: root.alpha(root.cForeground, 0.8)
     font.family: root.fontFamily

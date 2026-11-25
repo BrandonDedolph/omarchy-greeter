@@ -7,8 +7,16 @@ avatar="/var/lib/omarchy-greeter/$me/avatar.png"
 [[ -r $avatar ]] || avatar=""
 real_name() { getent passwd "$1" | cut -d: -f5 | cut -d, -f1; }
 
-others=$(loginctl list-sessions --json=short 2>/dev/null |
-  jq -r --arg me "$me" '[.[] | select(.user != $me and .class == "user" and .seat != null) | .user] | unique | .[]' 2>/dev/null || true)
+# Same rule as the login screen: a graphical (wayland/x11) session that is
+# not on its way out.
+others=""
+for sid in $(loginctl list-sessions --json=short 2>/dev/null |
+  jq -r --arg me "$me" '.[] | select(.user != $me and .class == "user" and .seat != null) | .session' 2>/dev/null); do
+  [[ $sid =~ ^[0-9a-zA-Z]+$ ]] || continue
+  read -r user type state < <(loginctl show-session "$sid" --property=Name --property=Type --property=State --value 2>/dev/null | paste -sd' ')
+  [[ $state != closing && ( $type == wayland || $type == x11 ) && -n $user ]] && others+="$user"$'\n'
+done
+others=$(printf '%s' "$others" | sort -u)
 
 {
   printf '%s\t%s\n' "$me" "$(real_name "$me")"
