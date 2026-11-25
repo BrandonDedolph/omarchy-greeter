@@ -1,16 +1,48 @@
 #!/bin/bash
-# Prints "unlock" whenever logind asks this session to unlock: SDDM does that
-# when you log back into a session you switched away from, and so does
-# `loginctl unlock-session`. Only logind can send it (the monitor only
-# accepts signals from org.freedesktop.login1), and logind only does so for
-# this account itself or an admin who authenticated.
+# Follows this session in logind and prints one word per change, for the
+# lock screen:
+#   active / inactive   the session came to the front / went to the background
+#                       (printed once at start with the current state)
+#   lock / unlock       logind asked the session to lock / unlock: SDDM sends
+#                       unlock when you log back into this session from the
+#                       login screen; `loginctl lock-session` sends lock.
+# Only logind can send these (the monitor only accepts signals from
+# org.freedesktop.login1), and logind only does so for this account itself
+# or an admin who authenticated.
 set -uo pipefail
+
 id=${XDG_SESSION_ID:-}
 [[ -n $id ]] || { echo "omarchy-greeter-session-watch: no XDG_SESSION_ID" >&2; exit 1; }
 path=$(busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
   org.freedesktop.login1.Manager GetSession s "$id" | awk '{gsub(/"/, "", $2); print $2}')
 [[ $path == /org/freedesktop/login1/session/* ]] || exit 1
-gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path" |
-  while IFS= read -r line; do
-    [[ $line == *"org.freedesktop.login1.Session.Unlock ("* ]] && echo unlock
-  done
+
+state() {
+  busctl --system get-property org.freedesktop.login1 "$path" org.freedesktop.login1.Session Active |
+    awk '{print ($2 == "true") ? "active" : "inactive"}'
+}
+
+# Start watching before reading the current state, so no change slips between.
+parent=$PPID
+coproc MONITOR { exec stdbuf -oL gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path"; }
+monitor_pid=$MONITOR_PID
+# Never outlive the shell that started us, nor leave the monitor behind.
+trap 'kill "$monitor_pid" 2>/dev/null' EXIT
+trap 'exit 0' TERM INT HUP PIPE
+state
+
+while true; do
+  IFS= read -r -t 15 line <&"${MONITOR[0]}"
+  rc=$?
+  if (( rc != 0 )); then
+    (( rc > 128 )) || exit 0                  # monitor ended
+    kill -0 "$parent" 2>/dev/null || exit 0   # timed out: is the shell still there?
+    continue
+  fi
+  case $line in
+    *"org.freedesktop.login1.Session.Unlock ("*) echo unlock ;;
+    *"org.freedesktop.login1.Session.Lock ("*) echo lock ;;
+    *"PropertiesChanged"*"'Active': <true>"*) echo active ;;
+    *"PropertiesChanged"*"'Active': <false>"*) echo inactive ;;
+  esac
+done

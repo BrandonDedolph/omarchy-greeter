@@ -1,5 +1,6 @@
 [Unit]
-Description=Prepare per-user folders for the Omarchy login screen
+Description=Publish every account's look and sizing for the Omarchy login screen
+After=local-fs.target home.mount
 Before=display-manager.service
 
 [Service]

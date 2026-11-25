@@ -17,6 +17,43 @@ end
 
 local primary = read_primary()
 
+-- Drive the displays exactly as the desktop does, so moving between the
+-- login screen and a session needs no mode change (which blanks monitors):
+--  * SDR, like Omarchy's desktop (cm_auto_hdr = 0). Hyprland's default
+--    switches HDR displays into HDR for a fullscreen window, and the login
+--    screen is one, so every switch flipped the signal and both monitors
+--    resynced.
+--  * the same mode, position and scale per monitor as the last user's
+--    desktop, published by omarchy-greeter-sync as "name WxH@R XxY scale".
+hl.config({ render = { cm_auto_hdr = 0 } })
+
+local function last_user()
+  local file = io.open("/var/lib/sddm/state.conf", "r")
+  if not file then return nil end
+  local user
+  for line in file:lines() do
+    local value = line:match("^%s*User%s*=%s*([%w._-]+)")
+    if value then user = value end
+  end
+  file:close()
+  return user
+end
+
+local function apply_user_monitors(user)
+  if not user then return end
+  local file = io.open("/var/lib/omarchy-greeter/" .. user .. "/monitors", "r")
+  if not file then return end
+  for line in file:lines() do
+    local name, mode, position, scale = line:match("^([%w._-]+) (%d+x%d+@[%d.]+) (%-?%d+x%-?%d+) ([%d.]+)$")
+    if name then
+      hl.monitor({ output = name, mode = mode, position = position, scale = tonumber(scale) })
+    end
+  end
+  file:close()
+end
+
+apply_user_monitors(last_user())
+
 local function primary_connected()
   for _, monitor in ipairs(hl.get_monitors()) do
     if monitor.name == primary then return true end

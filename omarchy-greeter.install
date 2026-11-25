@@ -28,6 +28,8 @@ post_upgrade() {
   systemctl enable omarchy-greeter-boot-unlock.service
   systemctl --global enable omarchy-greeter-presence.service
   add_pam_line
+  # Publish every account's look and sizing now, not just at next boot.
+  systemctl restart omarchy-greeter-dirs.service || true
 }
 
 pre_remove() {

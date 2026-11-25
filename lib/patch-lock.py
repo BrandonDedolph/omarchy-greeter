@@ -94,25 +94,73 @@ rep("Service.qml", '''  property string pendingPassword: ""
     Quickshell.execDetached(["omarchy-greeter-switch"].concat(name ? [name] : []))
   }
 
-  // logind asks the session to unlock when you log back into it from the
-  // login screen (and on `loginctl unlock-session`). Only logind can send it.
+  // Session state from logind (omarchy-greeter-session-watch):
+  //  - a session that goes to the background unlocked locks itself, so a
+  //    session you are not looking at is always locked;
+  //  - logind "unlock" (SDDM sends it when you log back into this session
+  //    from the login screen) unlocks, but only once the session is in front
+  //    again, so the unlock is drawn live instead of leaving a stale frame;
+  //  - logind "lock" (loginctl lock-session) locks.
+  property bool sessionActive: true
+  property bool pendingLogindUnlock: false
+
+  function handleSessionEvent(event) {
+    if (event === "active") {
+      root.sessionActive = true
+      if (root.pendingLogindUnlock) logindUnlockTimer.restart()
+    } else if (event === "inactive") {
+      root.sessionActive = false
+      if (!root.currentlyLocked() && !root.lockRequested) {
+        root.logEvent("lock: session went to the background")
+        Quickshell.execDetached(["omarchy-system-lock"])
+      }
+    } else if (event === "lock") {
+      root.pendingLogindUnlock = false
+      if (!root.currentlyLocked() && !root.lockRequested) {
+        root.logEvent("lock: logind")
+        Quickshell.execDetached(["omarchy-system-lock"])
+      }
+    } else if (event === "unlock") {
+      if (!root.lockRequested) return
+      root.pendingLogindUnlock = true
+      if (root.sessionActive) logindUnlockTimer.restart()
+    }
+  }
+
+  // A short wait after coming to the front lets the compositor take the
+  // displays back before the lock goes away.
+  Timer {
+    id: logindUnlockTimer
+    interval: 250
+    onTriggered: {
+      if (!root.pendingLogindUnlock || !root.sessionActive) return
+      root.pendingLogindUnlock = false
+      root.logEvent("logind-unlock")
+      root.finishUnlock()
+    }
+  }
+
+  // Tell logind whether this session is locked (LockedHint), for any tool
+  // that asks it.
+  readonly property bool lockedForHint: root.lockRequested || root.currentlyLocked()
+  onLockedForHintChanged: Quickshell.execDetached(["busctl", "--system", "call", "org.freedesktop.login1",
+    "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", root.lockedForHint ? "true" : "false"])
+  // A password unlock clears any logind unlock still waiting.
+  onLockRequestedChanged: if (!root.lockRequested) root.pendingLogindUnlock = false
+
   Process {
-    id: unlockWatch
+    id: sessionWatch
     command: ["omarchy-greeter-session-watch"]
     running: true
     stdout: SplitParser {
-      onRead: function(line) {
-        if (String(line).trim() !== "unlock" || !root.lockRequested) return
-        root.logEvent("logind-unlock")
-        root.finishUnlock()
-      }
+      onRead: function(line) { root.handleSessionEvent(String(line).trim()) }
     }
-    onExited: unlockWatchRestart.restart()
+    onExited: sessionWatchRestart.restart()
   }
   Timer {
-    id: unlockWatchRestart
+    id: sessionWatchRestart
     interval: 5000
-    onTriggered: unlockWatch.running = true
+    onTriggered: sessionWatch.running = true
   }
 ''')
 

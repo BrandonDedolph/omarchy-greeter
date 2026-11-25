@@ -14,6 +14,11 @@ if (( uptime >= 600 )); then rm -f "$FLAG"; exit 1; fi
 uid=$(id -u "$PAM_USER" 2>/dev/null) || exit 1
 (( uid >= 1000 && uid < 60000 )) || exit 1
 
+# Only for starting a new session. Returning to a running (locked) session
+# always takes that account's password.
+sessions=$(loginctl show-user "$PAM_USER" --property=Sessions --value 2>/dev/null)
+[[ -z ${sessions// /} ]] || exit 1
+
 # One login only: whoever claims the mark first.
 rm "$FLAG" 2>/dev/null || exit 1
 logger -t omarchy-greeter "boot unlock: $PAM_USER logged in with the disk password typed at boot"

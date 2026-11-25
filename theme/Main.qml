@@ -35,6 +35,8 @@ Rectangle {
   // account password (see boot-unlock-auth). PAM decides; this only changes
   // what the field says.
   property bool bootUnlocked: false
+  // The boot pass only starts new sessions (boot-unlock-auth enforces it).
+  readonly property bool bootPassFor: bootUnlocked && !userRunning
 
   Timer {
     interval: 1500
@@ -65,10 +67,12 @@ Rectangle {
   readonly property var display: look && look.display ? look.display : ({})
   readonly property real userScale: {
     var m = display.monitors || {}
-    var s = Number(m[Screen.name])
+    // Each monitor is { scale, width, ... } (older data: just the scale).
+    function scaleOf(v) { return Number(v && typeof v === "object" ? v.scale : v) }
+    var s = scaleOf(m[Screen.name])
     if (!(s > 0)) {
-      // Unknown connector: use the user's most common scale.
-      for (var k in m) { s = Number(m[k]); break }
+      // Unknown connector: use any of the user's scales.
+      for (var k in m) { s = scaleOf(m[k]); break }
     }
     return s > 0 ? s : Screen.devicePixelRatio
   }
@@ -114,7 +118,11 @@ Rectangle {
     readText(dataDir + "/" + name + "/session", function(id) {
       id = id.trim()
       if (!/^[0-9a-zA-Z]+$/.test(id)) { setLook(name, "running", false); return }
-      readText("/run/systemd/sessions/" + id, function(text) { setLook(name, "running", text.length > 0) })
+      // The session must still be known to logind and not on its way out.
+      readText("/run/systemd/sessions/" + id, function(text) {
+        var state = (text.match(/^STATE=(\w+)/m) || [])[1] || ""
+        setLook(name, "running", text.length > 0 && state !== "closing")
+      })
     })
   }
   Timer {
@@ -284,7 +292,7 @@ Rectangle {
 
   function login() {
     if (!userName || authenticating || !showsUi) return
-    if (password.text.length === 0 && !bootUnlocked) return
+    if (password.text.length === 0 && !bootPassFor) return
     authenticating = true
     loginFailed = false
     sddm.login(userName, password.text, sessionIndex)
@@ -513,7 +521,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 22 * root.ui
         anchors.verticalCenter: parent.verticalCenter
-        text: root.bootUnlocked && !root.loginFailed ? "\uf09c" : "\uf023"
+        text: root.bootPassFor && !root.loginFailed ? "\uf09c" : "\uf023"
         color: root.loginFailed ? root.cError : root.cMuted
         font.family: root.fontFamily
         font.pixelSize: 18 * root.ui
@@ -524,7 +532,7 @@ Rectangle {
         anchors.leftMargin: 52 * root.ui
         anchors.verticalCenter: parent.verticalCenter
         visible: password.text.length === 0 && !root.authenticating
-        text: root.loginFailed ? "Wrong password, try again" : (root.bootUnlocked ? "Unlocked at boot \u00b7 press Enter" : (root.userRunning ? "Password to unlock" : "Password"))
+        text: root.loginFailed ? "Wrong password, try again" : (root.bootPassFor ? "Unlocked at boot \u00b7 press Enter" : (root.userRunning ? "Password to unlock" : "Password"))
         color: root.loginFailed ? root.cError : root.cMuted
         font.family: root.fontFamily
         font.pixelSize: 16 * root.ui

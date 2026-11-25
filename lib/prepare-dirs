@@ -1,8 +1,11 @@
 #!/bin/bash
-# Give every human account its own folder under /var/lib/omarchy-greeter,
-# owned by that account and readable by the greeter. Runs at boot, so
-# accounts added later are picked up after a reboot (or a manual start).
-set -euo pipefail
+# Runs at boot, before the login screen:
+#  1. gives every human account its own folder under /var/lib/omarchy-greeter,
+#     owned by that account and readable by the greeter;
+#  2. publishes each account's look and display sizing (as that account, with
+#     omarchy-greeter-sync --offline), so the login screen shows every account
+#     the way it looks on its desktop, logged in this boot or not.
+set -uo pipefail
 ROOT=/var/lib/omarchy-greeter
 install -d -m 755 -o root -g root "$ROOT"
 
@@ -15,4 +18,16 @@ getent passwd | while IFS=: read -r name _ uid gid _ home shell; do
   # Never follow a link someone planted in place of the folder.
   [[ -L $dir ]] && rm -f "$dir"
   install -d -m 755 -o "$uid" -g "$gid" "$dir"
+  # Drop a session marker logind no longer knows (left by a crash or an
+  # earlier boot).
+  if [[ -f $dir/session ]]; then
+    sid=$(<"$dir/session")
+    [[ $sid =~ ^[0-9a-zA-Z]+$ && -e /run/systemd/sessions/$sid ]] || rm -f "$dir/session"
+  fi
+
+  [[ -d $home ]] || continue
+  timeout 30 runuser -u "$name" -- env -i HOME="$home" USER="$name" LOGNAME="$name" \
+    PATH=/usr/local/bin:/usr/bin:/usr/share/omarchy/bin \
+    /usr/bin/omarchy-greeter-sync --offline ||
+    echo "prepare-dirs: could not publish $name's look"
 done
