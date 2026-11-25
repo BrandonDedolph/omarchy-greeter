@@ -1,0 +1,11 @@
+[Unit]
+Description=Bring the improved lock screen up to date before the desktop starts
+Before=graphical-session-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-greeter-lock-setup --at-login
+TimeoutStartSec=30
+
+[Install]
+WantedBy=graphical-session-pre.target

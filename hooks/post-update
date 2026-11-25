@@ -1,6 +1,6 @@
 #!/bin/bash
-# omarchy-greeter: re-clone and re-patch the lock screen after every Omarchy
-# update, so the primary-monitor lock keeps Omarchy's latest lock fixes.
+# omarchy-greeter: re-patch the lock screen after an Omarchy update changed
+# the built-in lock, so the improved lock keeps Omarchy's latest fixes.
 if [[ -x /usr/bin/omarchy-greeter-lock-setup && -d $HOME/.config/omarchy/plugins/${USER}.lock ]]; then
-  /usr/bin/omarchy-greeter-lock-setup || true
+  /usr/bin/omarchy-greeter-lock-setup --if-changed || true
 fi

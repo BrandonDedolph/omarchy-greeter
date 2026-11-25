@@ -3,15 +3,23 @@
 # primary monitor only, who is signed in, and switching user. Clones the built-in lock
 # plugin (`omarchy plugin clone omarchy.lock`) and patches the clone.
 #
-# The clone is a snapshot, so it would miss Omarchy's later lock fixes. To
-# avoid that, re-running this (the installed post-update hook does it after
-# every `omarchy update`) throws the old clone away and re-clones fresh.
-# If the built-in lock code changed so the patch no longer fits, it stops
-# and leaves you on the built-in lock (form on every monitor) instead.
+# The clone is a snapshot, so it would miss Omarchy's later lock fixes. It is
+# rebuilt in place from the current built-in lock whenever that or the patch
+# changes (a hash is kept in the clone).
 #
-#   omarchy-greeter-lock-setup           clone fresh and patch
-#   omarchy-greeter-lock-setup --ensure  set up once, unless already done or opted out
-#   omarchy-greeter-lock-setup --remove  go back to the built-in lock (and opt out)
+# New lock code only takes effect when the shell starts: Omarchy's shell keeps
+# the lock loaded across plugin reloads on purpose (dropping it while the
+# screen is locked would break the lock), so there is no swapping it live.
+# To avoid restarting the desktop, rebuilds happen before the shell starts,
+# at login (omarchy-greeter-lock-update.service). The shell is restarted only
+# for the first setup of an account, and after an Omarchy update changed the
+# built-in lock (that update restarts the shell anyway).
+#
+#   omarchy-greeter-lock-setup               rebuild now (restarts the shell if running)
+#   omarchy-greeter-lock-setup --ensure      first setup only (from the settings sync)
+#   omarchy-greeter-lock-setup --if-changed  rebuild if the lock or patch changed (post-update hook)
+#   omarchy-greeter-lock-setup --at-login    rebuild if changed, before the shell starts; never restarts
+#   omarchy-greeter-lock-setup --remove      go back to the built-in lock (and opt out)
 
 set -euo pipefail
 
@@ -45,35 +53,70 @@ if [[ ${1:-} == --remove ]]; then
   exit 0
 fi
 
-if [[ ${1:-} == --ensure ]]; then
-  [[ -e $OPTOUT ]] && exit 0
-  [[ -d $DIR && -r $STAMP && $(<"$STAMP") == "$(stamp)" ]] && exit 0
+mode=${1:-}
+up_to_date() { [[ -d $DIR && -r $STAMP && $(<"$STAMP") == "$(stamp)" ]]; }
+case $mode in
+  --ensure) [[ -e $OPTOUT || -d $DIR ]] && exit 0 ;;
+  --if-changed|--at-login) [[ -e $OPTOUT || ! -d $DIR ]] && exit 0; up_to_date && exit 0 ;;
+  "") rm -f "$OPTOUT" ;;
+  *) echo "usage: omarchy-greeter-lock-setup [--ensure|--if-changed|--at-login|--remove]" >&2; exit 2 ;;
+esac
+
+# Swapping the lock while it is up would drop the lock client; try later
+# (the next theme or settings sync runs --ensure again).
+if [[ $mode != --at-login && $(omarchy-shell -q lock isLocked 2>/dev/null) == true ]]; then
+  echo "omarchy-greeter-lock-setup: screen is locked; will update the lock later" >&2
+  exit 0
 fi
-rm -f "$OPTOUT"
 
-remove_clone
-omarchy plugin clone omarchy.lock >/dev/null
+shell_running() { omarchy-shell shell ping >/dev/null 2>&1; }
 
-if ! python3 -I "$PATCH" "$DIR" "$MARK"; then
-  echo "omarchy-greeter-lock-setup: the built-in lock changed and the patch no longer fits; staying on the built-in lock" >&2
-  omarchy plugin remove "$ID" --yes >/dev/null || true
-  notify-send -u critical "Lock screen" "Omarchy's lock changed and the multi-user lock could not be applied; using the built-in lock (form on every monitor). Backgrounded sessions still lock." 2>/dev/null || true
+# Load the new lock code: only a shell start does (see above).
+reload_lock() {
+  [[ $mode == --at-login ]] && return 0
+  shell_running || return 0     # not running: it loads the clone when it starts
+  omarchy restart shell >/dev/null 2>&1 || true
+}
+
+give_up() {
+  echo "omarchy-greeter-lock-setup: $1; staying on the built-in lock" >&2
+  if [[ -d $DIR ]]; then
+    omarchy plugin remove "$ID" --yes >/dev/null 2>&1 || true
+    reload_lock
+  fi
+  notify-send -u critical "Lock screen" "$2" 2>/dev/null || true
   exit 1
-fi
+}
+
+# Build the patched lock beside the clone first, from the current stock one.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp -r /usr/share/omarchy/shell/plugins/lock/. "$work/"
+python3 -I "$PATCH" "$work" "$MARK" ||
+  give_up "the built-in lock changed and the patch no longer fits" \
+    "Omarchy's lock changed and the multi-user lock could not be applied; using the built-in lock (form on every monitor). Backgrounded sessions still lock."
 # A lock that fails to parse means no lock at all, so check before using it.
 if [[ -x /usr/lib/qt6/bin/qmllint ]] &&
-  /usr/lib/qt6/bin/qmllint "$DIR/Service.qml" "$DIR/LockView.qml" 2>&1 | grep -qE '\[syntax\]'; then
-  echo "omarchy-greeter-lock-setup: the patched lock does not parse; staying on the built-in lock" >&2
-  omarchy plugin remove "$ID" --yes >/dev/null || true
-  notify-send -u critical "Lock screen" "The multi-user lock did not build; using the built-in lock." 2>/dev/null || true
-  exit 1
+  /usr/lib/qt6/bin/qmllint "$work/Service.qml" "$work/LockView.qml" 2>&1 | grep -qE '\[syntax\]'; then
+  give_up "the patched lock does not parse" "The multi-user lock did not build; using the built-in lock."
 fi
-stamp > "$STAMP"
 
-# The lock is a keep-loaded plugin: the built-in stays running (and keeps
-# answering `omarchy system lock`) until the shell restarts.
-omarchy restart shell >/dev/null 2>&1 || omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
-# Re-clone after each `omarchy update` so the lock keeps Omarchy's fixes.
+if [[ -d $DIR ]]; then
+  grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null ||
+    { echo "omarchy-greeter-lock-setup: $DIR was not made by this script; leaving it alone" >&2; exit 1; }
+else
+  omarchy plugin clone omarchy.lock >/dev/null
+fi
+# Update the clone in place (its own manifest stays), so the shell only has
+# to reload the lock, not the whole desktop.
+for file in "$work"/*; do
+  [[ $(basename "$file") == manifest.json ]] && continue
+  cp -rf "$file" "$DIR/"
+done
+stamp > "$STAMP"
+reload_lock
+
+# Re-check after each `omarchy update` so the lock keeps Omarchy's fixes.
 mkdir -p "${HOOK%/*}"
 install -m 755 /usr/share/omarchy-greeter/hooks/post-update "$HOOK" 2>/dev/null || true
 echo "Lock screen now shows on the primary monitor only ($DIR)."

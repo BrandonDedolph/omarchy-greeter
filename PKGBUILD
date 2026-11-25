@@ -1,6 +1,6 @@
 # Local package: build with `makepkg -si` from this folder.
 pkgname=omarchy-greeter
-pkgver=2.5.1
+pkgver=2.6.0
 pkgrel=1
 pkgdesc="Multi-user Omarchy login screen that follows each user's background, theme and display scale"
 arch=(any)
@@ -18,6 +18,7 @@ package() {
   install -Dm644 systemd/user/omarchy-greeter-presence.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-presence.service"
   install -Dm755 bin/omarchy-greeter-guard "$pkgdir/usr/bin/omarchy-greeter-guard"
   install -Dm644 systemd/user/omarchy-greeter-guard.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-guard.service"
+  install -Dm644 systemd/user/omarchy-greeter-lock-update.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-lock-update.service"
   install -Dm755 bin/omarchy-greeter-sessions "$pkgdir/usr/bin/omarchy-greeter-sessions"
   install -Dm755 bin/omarchy-greeter-switch "$pkgdir/usr/bin/omarchy-greeter-switch"
   install -Dm755 bin/omarchy-greeter-session-watch "$pkgdir/usr/bin/omarchy-greeter-session-watch"

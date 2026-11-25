@@ -29,6 +29,18 @@ def rep(name, old, new):
 
 # ---------------------------------------------------------------- Service.qml
 
+# Lets omarchy-greeter-lock-setup confirm this copy, not the built-in, is the
+# one answering `omarchy-shell lock ...` after it reloads the lock.
+rep("Service.qml", '''    function isLocked(): string {
+''', '''    // "omarchy-greeter <when this instance started>": tells a freshly
+    // loaded lock from the one it replaced.
+    function owner(): string {
+      return "omarchy-greeter " + root.shellStartedAt
+    }
+
+    function isLocked(): string {
+''')
+
 # A lock out of sight (another console is in front) must not unlock (only a
 # deferred logind unlock may, once back in front), hold the fingerprint
 # reader or switch hardware off.
