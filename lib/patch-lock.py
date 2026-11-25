@@ -148,7 +148,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // Not for a lock of a session already out of sight, a lock coming back
   // after a shell restart, or one a logind unlock is about to lift.
   readonly property bool lockToLogin: {
-    var m = String(greeterSettings.text() || "").match(/^\s*lock_to_login\s*=\s*(\w*)/m)
+    var m = String(greeterSettings.text() || "").match(/^\\s*lock_to_login\\s*=\\s*(\\w*)/m)
     return !m || m[1] !== "no"
   }
   function maybeOpenLogin() {

@@ -49,7 +49,7 @@ SHELL_SCRIPTS = bin/* lib/boot-unlock-mark lib/boot-unlock-auth lib/prepare-dirs
 check:
 	bash -n $(SHELL_SCRIPTS)
 	shellcheck -s bash $(SHELL_SCRIPTS)
-	python3 -c 'import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' lib/patch-lock.py lib/publish-view
+	python3 -W error -c 'import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' lib/patch-lock.py lib/publish-view
 	luac -p share/hyprland.lua
 	! /usr/lib/qt6/bin/qmllint theme/*.qml lock/*.qml 2>&1 | grep -E '\[syntax\]'
 

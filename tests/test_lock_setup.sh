@@ -16,6 +16,7 @@ exit 0
 SH
 printf '#!/bin/bash\nexit 1\n' > "$fake/omarchy-shell"        # no shell running
 printf '#!/bin/bash\necho "$*" >> %q\n' "$notes" > "$fake/notify-send"
+printf '#!/bin/bash\nexit 0\n' > "$fake/logger"   # never into the real journal
 chmod +x "$fake"/*
 setup() { env HOME="$home" USER=$me PATH="$fake:$PATH" "$@" "$REPO/bin/omarchy-greeter-lock-setup" "${args[@]}"; }
 run() { args=("$@"); setup env OMARCHY_GREETER_LOCK_UI="$REPO/lock:$REPO/theme" OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
