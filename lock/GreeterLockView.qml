@@ -100,14 +100,15 @@ Item {
   function forcePasswordFocus() { pw.focusInput() }
   function clearPassword() { passwordTextEdited("") }
 
-  // Focus on the account list (Tab) is left alone; anything else that takes
-  // focus away, like a VT switch around suspend, hands it back to the field.
-  function inAccountList(item) {
-    for (var it = item; it; it = it.parent) if (it === accountList) return true
+  // Focus moved with Tab (account list, power buttons) is left alone;
+  // anything else that takes focus away, like a VT switch around suspend,
+  // hands it back to the field.
+  function tabbable(item) {
+    for (var it = item; it; it = it.parent) if (it === accountList || it === powerRow) return true
     return false
   }
   function restorePasswordFocus() {
-    if (inputEnabled && pw.input.enabled && !pw.focused && !inAccountList(Window.activeFocusItem)) forcePasswordFocus()
+    if (inputEnabled && pw.input.enabled && !pw.focused && !tabbable(Window.activeFocusItem)) forcePasswordFocus()
   }
   Window.onActiveFocusItemChanged: Qt.callLater(restorePasswordFocus)
   onInputEnabledChanged: if (inputEnabled) Qt.callLater(forcePasswordFocus)
@@ -261,6 +262,32 @@ Item {
       passwordBox.inputEnabled: root.inputEnabled
     }
 
+    // ---- accounts, bottom-left ---------------------------------------------
+
+    // Every account the login screen offers; choosing another one opens the
+    // login screen with it selected, while this session stays locked.
+    AccountList {
+      id: accountList
+      st: formStyle
+      visible: root.extrasEnabled && root.accountRows.length > 1
+      enabled: root.extrasEnabled
+      anchors.left: parent.left
+      anchors.bottom: parent.bottom
+      anchors.leftMargin: 36 * formStyle.ui
+      anchors.bottomMargin: 36 * formStyle.ui
+      accounts: root.accountRows
+      selected: root.me
+      onChosen: (name) => {
+        root.wakeRequested()
+        if (name === root.me) root.forcePasswordFocus()
+        else root.switchUserRequested(name)
+      }
+      onTyped: (text) => {
+        root.forcePasswordFocus()
+        root.passwordTextEdited(root.passwordText + text)
+      }
+    }
+
     // ---- machine, top-left; power, bottom-right ------------------------------
 
     FileView {
@@ -309,32 +336,6 @@ Item {
         label: "Shut down"
         hoverInk: formStyle.error
         onClicked: root.powerRequested("poweroff")
-      }
-    }
-
-    // ---- accounts, bottom-left ---------------------------------------------
-
-    // Every account the login screen offers; choosing another one opens the
-    // login screen with it selected, while this session stays locked.
-    AccountList {
-      id: accountList
-      st: formStyle
-      visible: root.extrasEnabled && root.accountRows.length > 1
-      enabled: root.extrasEnabled
-      anchors.left: parent.left
-      anchors.bottom: parent.bottom
-      anchors.leftMargin: 36 * formStyle.ui
-      anchors.bottomMargin: 36 * formStyle.ui
-      accounts: root.accountRows
-      selected: root.me
-      onChosen: (name) => {
-        root.wakeRequested()
-        if (name === root.me) root.forcePasswordFocus()
-        else root.switchUserRequested(name)
-      }
-      onTyped: (text) => {
-        root.forcePasswordFocus()
-        root.passwordTextEdited(root.passwordText + text)
       }
     }
   }

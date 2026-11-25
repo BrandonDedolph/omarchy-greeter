@@ -45,6 +45,51 @@ Window {
         l.powerRequested("suspend")
       }
       console.warn("harness: events=" + win.events.join(","))
+      // Tab from the password box: wherever it lands must keep focus (the
+      // lock pulls focus back to the field only when it went elsewhere).
+      if (l && l.pw) {
+        l.forcePasswordFocus()
+        var hops = []
+        win.tabTargets = []
+        var item = l.pw.input
+        for (var i = 0; i < 6; i++) {
+          item = item.nextItemInFocusChain(true)
+          if (!item || item === l.pw.input) break
+          win.tabTargets.push(item)
+        }
+        win.tabIndex = 0
+        tabStep.start()
+        return
+      }
+      win.finish(l)
+    }
+  }
+
+  property var tabTargets: []
+  property int tabIndex: 0
+  property var tabResults: []
+  Timer {
+    id: tabStep
+    interval: 60
+    onTriggered: {
+      var l = view.layout
+      if (win.tabIndex > 0) {
+        var want = win.tabTargets[win.tabIndex - 1]
+        win.tabResults.push(win.activeFocusItem === want ? "kept" : "lost")
+      }
+      if (win.tabIndex < win.tabTargets.length) {
+        win.tabTargets[win.tabIndex].forceActiveFocus(Qt.TabFocusReason)
+        win.tabIndex++
+        tabStep.start()
+        return
+      }
+      console.warn("harness: tab=" + win.tabResults.join(","))
+      win.finish(l)
+    }
+  }
+
+  function finish(l) {
+    {
       var shot = Qt.application.arguments[Qt.application.arguments.length - 1]
       if (/\.png$/.test(shot)) {
         if (l && l.pw) { view.passwordText = "hunter22" }
