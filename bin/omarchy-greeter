@@ -322,6 +322,8 @@ cmd_menu() {
   # An empty object on one line has no line to insert after.
   [[ $(tr -d '[:space:]' < "$MENU_FILE") == "{}" ]] && printf '{\n}\n' > "$MENU_FILE"
   tmp=$(mktemp "$MENU_FILE.XXXXXX")
+  # mktemp makes it 0600; keep the file's own mode.
+  chmod --reference="$MENU_FILE" "$tmp"
   # Drop the old block, then (for install) put the new one right after the
   # opening brace: every entry ends with a comma, which JSONC allows before
   # whatever follows.

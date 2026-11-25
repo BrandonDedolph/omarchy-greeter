@@ -53,6 +53,7 @@ remove_offline() {
   local config="$HOME/.config/omarchy/shell.json" tmp
   [[ -f $config ]] || return 0
   tmp=$(mktemp "$config.XXXXXX")
+  chmod --reference="$config" "$tmp"
   if jq --arg id "$ID" '
       (if .plugins then .plugins |= map(select((.id? // .) != $id)) else . end)
       | (if .disabledPlugins then .disabledPlugins -= ["omarchy.lock", $id] else . end)

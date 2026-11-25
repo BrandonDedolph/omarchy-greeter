@@ -8,7 +8,7 @@ dir="/var/lib/omarchy-greeter/$(id -un)"
 case ${1:-} in
   start)
     [[ ${XDG_SESSION_ID:-} =~ ^[0-9a-zA-Z]+$ ]] || exit 0
-    printf '%s\n' "$XDG_SESSION_ID" > "$dir/.session.tmp" && chmod 644 "$dir/.session.tmp" && mv -f "$dir/.session.tmp" "$dir/session"
+    printf '%s\n' "$XDG_SESSION_ID" > "$dir/.session.tmp" && chmod 600 "$dir/.session.tmp" && mv -f "$dir/.session.tmp" "$dir/session"
     ;;
   stop) rm -f "$dir/session" ;;
 esac
