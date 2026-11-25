@@ -1,7 +1,17 @@
 -- Compositor config for the omarchy-greeter login screen: Omarchy's own
 -- greeter config, plus keeping keyboard focus on the primary monitor so
 -- typing always reaches the visible password field.
-dofile("/usr/share/sddm/hyprland.lua")
+-- Everything below fails soft: if an Omarchy or Hyprland update moves a file
+-- or changes the Lua API, that one piece is skipped (and logged) and the
+-- login screen still comes up, at worst with Hyprland's defaults.
+local function try(what, fn, ...)
+  local ok, err = pcall(fn, ...)
+  if not ok then print("omarchy-greeter: " .. what .. " skipped: " .. tostring(err)) end
+  return ok
+end
+
+-- Omarchy's own greeter config first (keyboard layout and the like).
+try("Omarchy greeter config", dofile, "/usr/share/sddm/hyprland.lua")
 
 local function read_primary()
   local file = io.open("/etc/omarchy-greeter.conf", "r")
@@ -25,7 +35,7 @@ local primary = read_primary()
 --    resynced.
 --  * the same mode, position and scale per monitor as the last user's
 --    desktop, published by omarchy-greeter-sync as "name WxH@R XxY scale".
-hl.config({ render = { cm_auto_hdr = 0 } })
+try("SDR", function() hl.config({ render = { cm_auto_hdr = 0 } }) end)
 
 local function last_user()
   local file = io.open("/var/lib/sddm/state.conf", "r")
@@ -56,7 +66,7 @@ local function apply_user_monitors(user)
   file:close()
 end
 
-apply_user_monitors(last_user())
+try("monitor layout", function() apply_user_monitors(last_user()) end)
 
 local function primary_connected()
   for _, monitor in ipairs(hl.get_monitors()) do
@@ -65,20 +75,22 @@ local function primary_connected()
   return false
 end
 
-if primary ~= "" then
+if primary ~= "" then try("primary monitor", function()
   hl.config({
     input = { follow_mouse = 0 },
     cursor = { default_monitor = primary },
   })
 
   local function focus_primary()
-    if not primary_connected() then return end
-    local active = hl.get_active_monitor()
-    if active and active.name == primary then return end
-    hl.dispatch(hl.dsp.focus({ monitor = primary }))
+    pcall(function()
+      if not primary_connected() then return end
+      local active = hl.get_active_monitor()
+      if active and active.name == primary then return end
+      hl.dispatch(hl.dsp.focus({ monitor = primary }))
+    end)
   end
 
   hl.on("window.open", focus_primary)
   hl.on("monitor.focused", focus_primary)
   hl.on("monitor.added", focus_primary)
-end
+end) end
