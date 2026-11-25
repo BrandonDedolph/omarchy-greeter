@@ -141,6 +141,36 @@ rep("Service.qml", '''  property string pendingPassword: ""
     Quickshell.execDetached(["omarchy-greeter-switch"].concat(name ? [name] : []))
   }
 
+  // Locking opens the login screen with this account selected, like
+  // Windows: one screen for locking and signing in (lock_to_login in
+  // /etc/omarchy-greeter.conf, on unless "no"). This lock stays up
+  // underneath, so if the login screen does not come up, this is what shows.
+  // Not for a lock of a session already out of sight, a lock coming back
+  // after a shell restart, or one a logind unlock is about to lift.
+  readonly property bool lockToLogin: {
+    var m = String(greeterSettings.text() || "").match(/^\s*lock_to_login\s*=\s*(\w*)/m)
+    return !m || m[1] !== "no"
+  }
+  function maybeOpenLogin() {
+    if (!root.lockToLogin || !sessionLock.locked || !root.sessionActive) return
+    if (root.justStarted() || root.logindUnlockPending()) return
+    openLoginTimer.restart()
+  }
+  Connections {
+    target: sessionLock
+    function onLockStateChanged() { root.maybeOpenLogin() }
+  }
+  // A moment for the lock's first frame, so the switch never shows the desktop.
+  Timer {
+    id: openLoginTimer
+    interval: 300
+    onTriggered: {
+      if (!sessionLock.locked || !root.sessionActive || root.logindUnlockPending()) return
+      root.logEvent("lock: opening the login screen")
+      root.switchUser(root.userName)
+    }
+  }
+
   // Session state from logind (omarchy-greeter-session-watch):
   //  - a session that goes to the background unlocked locks itself, so a
   //    session you are not looking at is always locked;

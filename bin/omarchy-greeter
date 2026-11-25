@@ -9,6 +9,9 @@
 #   omarchy-greeter boot-pass [on|off|toggle] [account]
 #                                               disk password at boot also logs this account in once
 #   omarchy-greeter video [on|off]              allow video backgrounds on the login screen
+#   omarchy-greeter lock-to-login [on|off|toggle]
+#                                               locking opens the login screen (default on)
+#   omarchy-greeter screen-off [seconds]        login screen turns the displays off (0: never)
 #
 # Your own account:
 #   omarchy-greeter lock [on|off|toggle]        the multi-user lock screen (who is signed in, switch user)
@@ -72,7 +75,8 @@ root_set() {  # root_set <key> <value>, only the known keys and values
   case $key in
     primary) [[ $value =~ ^[A-Za-z0-9_.-]*$ ]] || die "not a monitor name: $value" ;;
     boot_unlock) [[ $value == "no" || $value =~ ^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$ ]] || die "boot_unlock is no or a list of accounts" ;;
-    video) [[ $value == "yes" || $value == "no" ]] || die "video is yes or no" ;;
+    video|lock_to_login) [[ $value == "yes" || $value == "no" ]] || die "$key is yes or no" ;;
+    screen_off) [[ $value =~ ^[0-9]{1,4}$ ]] || die "screen_off is a number of seconds" ;;
     *) die "unknown setting: $key" ;;
   esac
   [[ -f $CONF && ! -L $CONF ]] || install -m 644 /dev/null "$CONF"
@@ -150,6 +154,35 @@ cmd_video() {
     off) as_root _video no; echo "The login screen shows a still of video backgrounds." ;;
     toggle) if [[ $(cmd_video) == "on" ]]; then cmd_video off; else cmd_video on; fi ;;
     *) die "usage: omarchy-greeter video [on|off|toggle]" ;;
+  esac
+}
+
+# Locking opens the login screen with your account selected (one screen for
+# locking and signing in). Off: Omarchy's lock screen inside the session,
+# which also takes a fingerprint (the login screen takes passwords only).
+cmd_lock_to_login() {
+  case ${1:-} in
+    "") [[ $(conf_get lock_to_login) == "no" ]] && echo off || echo on ;;
+    on) as_root _set lock_to_login yes; echo "Locking opens the login screen." ;;
+    off) as_root _set lock_to_login no; echo "Locking shows the lock screen inside your session." ;;
+    toggle) if [[ $(cmd_lock_to_login) == "on" ]]; then cmd_lock_to_login off; else cmd_lock_to_login on; fi ;;
+    *) die "usage: omarchy-greeter lock-to-login [on|off|toggle]" ;;
+  esac
+}
+
+cmd_screen_off() {
+  local value
+  case ${1:-} in
+    "") value=$(conf_get screen_off); echo "${value:-120}" ;;
+    *)
+      [[ $1 =~ ^[0-9]{1,4}$ ]] || die "usage: omarchy-greeter screen-off [seconds]  (0: never)"
+      value=$1
+      (( value == 0 || value >= 15 )) || value=15
+      (( value <= 3600 )) || value=3600
+      as_root _set screen_off "$value"
+      if (( value == 0 )); then echo "The login screen keeps the displays on."
+      else echo "The login screen turns the displays off after ${value}s without typing (from the next time it opens)."; fi
+      ;;
   esac
 }
 
@@ -294,6 +327,7 @@ menu_entries() {
   "setup.greeter.monitor.all": {"icon":"󰍺","label":"All","checked":"[[ \$(omarchy-greeter monitor) == all ]]","action":"omarchy-greeter monitor all"},
   "setup.greeter.boot-pass": {"icon":"󰌾","label":"Boot Login","description":"disk password login","checked":"[[ \$(omarchy-greeter boot-pass) == on ]]","action":"omarchy-greeter boot-pass toggle"},
   "setup.greeter.lock": {"icon":"󰷛","label":"User Lock","description":"switch user signed in","checked":"[[ \$(omarchy-greeter lock) == on ]]","action":"omarchy-greeter lock toggle"},
+  "setup.greeter.lock-to-login": {"icon":"󰌆","label":"Lock to Login","description":"locking opens the login screen","checked":"[[ \$(omarchy-greeter lock-to-login) == on ]]","action":"omarchy-greeter lock-to-login toggle"},
   "setup.greeter.video": {"icon":"󰕧","label":"Video Login","description":"video backgrounds","checked":"[[ \$(omarchy-greeter video) == on ]]","action":"omarchy-greeter video toggle"},
   "setup.greeter.publish": {"icon":"󰸉","label":"My Look","description":"theme background","checked":"[[ \$(omarchy-greeter publish) == on ]]","action":"omarchy-greeter publish toggle"},
   "setup.greeter.users": {"icon":"󰀄","label":"Accounts"},
@@ -476,6 +510,10 @@ cmd_status() {
   [[ -n $accounts ]] && boot="on for ${accounts//,/, }"
   echo "One password at boot:        $boot${boot_status:+ (this boot: $boot_status)}"
   echo "Video backgrounds at login:  $(cmd_video)"
+  echo "Locking opens login screen:  $(cmd_lock_to_login)"
+  local off
+  off=$(cmd_screen_off)
+  echo "Login screen display off:    $([[ $off == 0 ]] && echo never || echo "after ${off}s")"
   echo "Multi-user lock (you):       $(cmd_lock)"
   echo "Your look on login screen:   $(cmd_publish)"
   echo "Updates with omarchy update: $(cmd_auto_update)"
@@ -489,6 +527,8 @@ case ${1:-status} in
   monitor) shift; cmd_monitor "$@" ;;
   boot-pass) shift; cmd_boot_pass "$@" ;;
   video) shift; cmd_video "$@" ;;
+  lock-to-login) shift; cmd_lock_to_login "$@" ;;
+  screen-off) shift; cmd_screen_off "$@" ;;
   lock) shift; cmd_lock "$@" ;;
   publish) shift; cmd_publish "$@" ;;
   menu) shift; cmd_menu "$@" ;;

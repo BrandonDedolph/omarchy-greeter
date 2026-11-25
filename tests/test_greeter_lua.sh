@@ -24,6 +24,18 @@ check_not "odd name refused" grep -q 'bad;name' <<<"$out"
 check "primary focus wired up" grep -qx 'on monitor.added' <<<"$out"
 check_not "no Lua errors" grep -q 'skipped' <<<"$out"
 
+# Screens off after screen_off seconds without typing (default 120); a key
+# press starts the count again.
+idle() { sed -n '/^at /p;/^dpms /p' <<<"$out" | paste -sd' '; }
+equal "off after two minutes, again after a key press" "at 119 at 121 dpms disable at 200 at 330 dpms disable" "$(idle)"
+printf 'primary=DP-2\nscreen_off=0\n' > "$fx/omarchy-greeter.conf"
+out=$("$lua" "$REPO/tests/greeter_lua_harness.lua" "$REPO" "$fx" 2>&1)
+check_not "screen_off=0: never off" grep -q '^dpms' <<<"$out"
+printf 'primary=DP-2\nscreen_off=300\n' > "$fx/omarchy-greeter.conf"
+out=$("$lua" "$REPO/tests/greeter_lua_harness.lua" "$REPO" "$fx" 2>&1)
+equal "screen_off=300: not yet" "at 119 at 121 at 200 at 330" "$(idle)"
+printf 'primary=DP-2\n' > "$fx/omarchy-greeter.conf"
+
 # Only the root-checked copy is read, never the account's own folder.
 mkdir -p "$fx/alex" && cp "$fx/.view/alex/monitors" "$fx/alex/monitors" && rm "$fx/.view/alex/monitors"
 out=$("$lua" "$REPO/tests/greeter_lua_harness.lua" "$REPO" "$fx" 2>&1)

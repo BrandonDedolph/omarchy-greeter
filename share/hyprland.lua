@@ -13,19 +13,19 @@ end
 -- Omarchy's own greeter config first (keyboard layout and the like).
 try("Omarchy greeter config", dofile, "/usr/share/sddm/hyprland.lua")
 
-local function read_primary()
+local function read_setting(key)
   local file = io.open("/etc/omarchy-greeter.conf", "r")
   if not file then return "" end
-  local primary = ""
+  local found = ""
   for line in file:lines() do
-    local value = line:match("^%s*primary%s*=%s*(%S*)")
-    if value then primary = value end
+    local value = line:match("^%s*" .. key .. "%s*=%s*(%S*)")
+    if value then found = value end
   end
   file:close()
-  return primary
+  return found
 end
 
-local primary = read_primary()
+local primary = read_setting("primary")
 
 -- Drive the displays exactly as the desktop does, so moving between the
 -- login screen and a session needs no mode change (which blanks monitors):
@@ -102,4 +102,39 @@ if primary ~= "" then try("primary monitor", function()
   hl.on("window.open", focus_primary)
   hl.on("monitor.focused", focus_primary)
   hl.on("monitor.added", focus_primary)
+end) end
+
+-- Turn the displays off after screen_off seconds without typing (default
+-- 120; 0: never). Locking opens this screen, so it has to blank the way the
+-- lock does. A key press or mouse move turns them back on (Hyprland), and the
+-- check below notices and starts counting again.
+local screen_off = tonumber(read_setting("screen_off")) or 120
+if screen_off > 0 then try("screen off", function()
+  screen_off = math.min(math.max(screen_off, 15), 3600)
+  hl.config({ misc = { key_press_enables_dpms = true, mouse_move_enables_dpms = true } })
+  local last_input = os.time()
+  local blanked = false
+  hl.on("input.keyboard.key", function()
+    last_input = os.time()
+    blanked = false
+  end)
+  hl.timer(function()
+    pcall(function()
+      if blanked then
+        -- Woken by the mouse (no event for that): count from now.
+        for _, monitor in ipairs(hl.get_monitors()) do
+          if monitor.dpms_status then
+            blanked = false
+            last_input = os.time()
+            return
+          end
+        end
+        return
+      end
+      if os.time() - last_input >= screen_off then
+        hl.dispatch(hl.dsp.dpms({ action = "disable" }))
+        blanked = true
+      end
+    end)
+  end, { timeout = 5000, type = "repeat" })
 end) end
