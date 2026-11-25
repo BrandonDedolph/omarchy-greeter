@@ -2,10 +2,12 @@ import QtQuick
 import QtQuick.Effects
 import QtQuick.Window
 
-// Omarchy login screen for several users. Each user's own background and
-// theme colors (published by omarchy-greeter-sync into dataDir) follow the
-// selected account, and switching accounts reveals the next background with
-// the desktop's slanted wipe.
+// Omarchy login screen for several users, laid out like Windows: the
+// selected account centered (avatar, name, password), every account listed
+// bottom-left, power bottom-right. Each account's own blurred background
+// and theme colors (published by omarchy-greeter-sync into dataDir) follow
+// the selection, revealed with the desktop's slanted wipe. The form is the
+// same one the lock screen uses (AccountForm.qml).
 Rectangle {
   id: root
   width: 1920
@@ -57,7 +59,7 @@ Rectangle {
       var m = text.match(/^\s*primary\s*=\s*(\S*)/m)
       root.primaryOutput = m ? m[1] : ""
     })
-    password.forceActiveFocus()
+    pw.focusInput()
     addDemoUsers()
   }
 
@@ -165,10 +167,10 @@ Rectangle {
     if (index === current && fromOtherScreen) return
     current = index
     if (!fromOtherScreen) publishSelection()
-    password.text = ""
+    pw.text = ""
     loginFailed = false
     authenticating = false
-    password.forceActiveFocus()
+    pw.focusInput()
   }
 
   function fileUrl(path) { return "file://" + path }
@@ -243,6 +245,11 @@ Rectangle {
       stamp = stamp.trim()
       setLook(name, "background", fileUrl(dir + "background.jpg") + (stamp ? "?v=" + stamp : ""))
       setLook(name, "avatar", fileUrl(dir + "avatar.png") + (stamp ? "?v=" + stamp : ""))
+      // The pre-blurred copy, if this account published one (older data
+      // has only the sharp background).
+      readText(dir + "background-blur.jpg", function(data) {
+        setLook(name, "blur", data.length > 0 ? fileUrl(dir + "background-blur.jpg") + (stamp ? "?v=" + stamp : "") : "")
+      })
     })
     readText(dir + "colors.toml", function(text) { setLook(name, "colors", parseColors(text)) })
     readText(dir + "display.json", function(text) {
@@ -321,10 +328,10 @@ Rectangle {
 
   function login() {
     if (!userName || authenticating || !showsUi) return
-    if (password.text.length === 0 && !bootPassFor) return
+    if (pw.text.length === 0 && !bootPassFor) return
     authenticating = true
     loginFailed = false
-    sddm.login(userName, password.text, sessionIndex)
+    sddm.login(userName, pw.text, sessionIndex)
   }
 
   Connections {
@@ -332,18 +339,45 @@ Rectangle {
     function onLoginFailed() {
       root.authenticating = false
       root.loginFailed = true
-      password.text = ""
-      shake.restart()
-      password.forceActiveFocus()
+      pw.text = ""
+      pw.shake()
+      pw.focusInput()
     }
     function onLoginSucceeded() {
       root.loginFailed = false
     }
   }
 
+  // ---- shared form style -------------------------------------------------
+
+  FormStyle {
+    id: formStyle
+    ui: root.ui
+    fontFamily: root.fontFamily
+    back: root.cBackground
+    text: root.cForeground
+    bright: root.cBright
+    muted: root.cMuted
+    accent: root.cAccent
+    error: root.cError
+    warn: root.cWarn
+  }
+  readonly property var pw: form.passwordBox
+
+  // Accounts for the list, each in its own colors.
+  readonly property var accountRows: {
+    var rows = []
+    for (var i = 0; i < users.length; i++) {
+      var u = users[i], l = looks[u.name] || {}
+      var c = l.colors || {}
+      rows.push({ name: u.name, label: u.realName || u.name, picture: l.avatar || "", faceIcon: u.icon || "",
+                  accent: c.accent || "", ink: c.background || "", signedIn: !!l.running })
+    }
+    return rows
+  }
+
   // ---- background --------------------------------------------------------
 
-  // Everything behind the UI, so the frosted card can blur it.
   Item {
     id: scene
     anchors.fill: parent
@@ -354,10 +388,12 @@ Rectangle {
     Behavior on scale { NumberAnimation { duration: 1600; easing.type: Easing.OutCubic } }
     Component.onCompleted: entered = true
 
+    // The account's background, blurred ahead of time (sharp if it has no
+    // blurred copy yet).
     RevealBackground {
       id: background
       anchors.fill: parent
-      source: root.showsUi && root.look && root.look.background ? root.look.background : ""
+      source: root.showsUi && root.look ? (root.look.blur || root.look.background || "") : ""
       fallbackColor: root.cBackground
       decodeSize: Qt.size(Math.ceil(root.width * Screen.devicePixelRatio), Math.ceil(root.height * Screen.devicePixelRatio))
     }
@@ -374,7 +410,7 @@ Rectangle {
   // through only a few dozen color levels and shows as horizontal bands.
   Rectangle {
     anchors.fill: parent
-    color: root.alpha(root.cBackground, 0.30)
+    color: root.alpha(root.cBackground, root.look && root.look.video ? 0.5 : 0.3)
   }
 
   // ---- clock -------------------------------------------------------------
@@ -386,8 +422,8 @@ Rectangle {
     id: clock
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.top: parent.top
-    anchors.topMargin: root.height * 0.12
-    spacing: 4 * root.ui
+    anchors.topMargin: root.height * 0.08
+    spacing: 2 * root.ui
     opacity: 0
     Component.onCompleted: opacity = 1
     Behavior on opacity { NumberAnimation { duration: 900 } }
@@ -397,354 +433,102 @@ Rectangle {
       text: Qt.formatTime(root.now, Qt.locale().timeFormat(Locale.ShortFormat).replace(/:ss/, ""))
       color: root.cBright
       font.family: root.fontFamily
-      font.pixelSize: 112 * root.ui
+      font.pixelSize: 64 * root.ui
       font.weight: Font.Light
-      layer.enabled: true
-      layer.effect: MultiEffect { shadowEnabled: true; shadowColor: root.alpha(root.cBackground, 0.8); shadowBlur: 0.8 }
     }
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       text: Qt.formatDate(root.now, "dddd, MMMM d")
       color: root.cForeground
       font.family: root.fontFamily
-      font.pixelSize: 22 * root.ui
-      layer.enabled: true
-      layer.effect: MultiEffect { shadowEnabled: true; shadowColor: root.alpha(root.cBackground, 0.8); shadowBlur: 0.6 }
+      font.pixelSize: 17 * root.ui
     }
   }
 
-  // ---- login card --------------------------------------------------------
+  // ---- the form ----------------------------------------------------------
 
-  // Frosted glass behind the card: the scene blurred and tinted with the
-  // theme background, so any wallpaper (even one with a centered logo) stays
-  // readable.
-  // A plain translucent panel behind the form. (A live blur with a soft
-  // mask edge here stepped into visible rings on dark backgrounds.)
-  Rectangle {
-    id: frost
-    x: card.x - 44 * root.ui
-    y: card.y - 36 * root.ui
-    width: card.width + 88 * root.ui
-    height: card.height + 72 * root.ui
-    opacity: card.opacity
-    radius: 28 * root.ui
-    color: root.alpha(root.cBackground, 0.78)
-    border.width: 1
-    border.color: root.alpha(root.cForeground, 0.14)
-  }
-
-  Column {
-    id: card
+  AccountForm {
+    id: form
+    st: formStyle
     anchors.horizontalCenter: parent.horizontalCenter
-    anchors.bottom: parent.bottom
-    anchors.bottomMargin: root.height * 0.11
-    spacing: 18 * root.ui
+    anchors.verticalCenter: parent.verticalCenter
+    anchors.verticalCenterOffset: root.height * 0.03
     opacity: 0
     Component.onCompleted: opacity = 1
     Behavior on opacity { NumberAnimation { duration: 700 } }
 
-    UserAvatar {
-      id: bigAvatar
-      anchors.horizontalCenter: parent.horizontalCenter
-      width: 112 * root.ui
-      height: width
-      ringWidth: 3 * root.ui
-      picture: root.look && root.look.avatar ? root.look.avatar : ""
-      faceIcon: root.user ? root.user.icon : ""
-      label: root.user ? (root.user.realName || root.user.name) : ""
-      accent: root.cAccent
-      ink: root.cBackground
-      fontFamily: root.fontFamily
-    }
+    displayName: root.user ? (root.user.realName || root.user.name) : ""
+    userName: root.userName
+    picture: root.look && root.look.avatar ? root.look.avatar : ""
+    faceIcon: root.user ? root.user.icon : ""
+    status: root.userRunning ? "Signed in · locked" : ""
+    statusGlyph: root.userRunning ? "" : ""
+    message: root.bootPassFor && !root.loginFailed ? "Your disk password already unlocked this account" : ""
 
-    Column {
-      anchors.horizontalCenter: parent.horizontalCenter
-      spacing: 2 * root.ui
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: root.user ? (root.user.realName || root.user.name) : ""
-        textFormat: Text.PlainText
-        color: root.cBright
-        font.family: root.fontFamily
-        font.pixelSize: 26 * root.ui
-        font.bold: true
+    passwordBox.placeholder: root.loginFailed ? "Wrong password, try again"
+      : (root.bootPassFor ? "Press Enter to sign in" : (root.userRunning ? "Password to unlock" : "Password"))
+    passwordBox.failed: root.loginFailed
+    passwordBox.busy: root.authenticating
+    passwordBox.capsOn: root.capsOn
+    passwordBox.openLock: root.bootPassFor
+    passwordBox.inputEnabled: root.showsUi
+  }
+
+  Connections {
+    target: root.pw
+    function onSubmitted() { root.login() }
+    function onKeyFilter(event) {
+      if (event.text.length === 1 && event.text.toLowerCase() !== event.text.toUpperCase()) {
+        var upper = event.text !== event.text.toLowerCase()
+        var shift = (event.modifiers & Qt.ShiftModifier) !== 0
+        root.capsGuess = upper !== shift
       }
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        visible: !!root.user && !!root.user.realName && root.user.realName !== root.user.name
-        text: root.user ? root.user.name : ""
-        textFormat: Text.PlainText
-        color: root.cForeground
-        font.family: root.fontFamily
-        font.pixelSize: 15 * root.ui
-      }
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        visible: !!root.user
-        text: root.userRunning ? "\uf023  Locked \u00b7 resumes session" : "\uf2f6  Log in"
-        color: root.userRunning ? root.cAccent : root.alpha(root.cForeground, 0.75)
-        font.family: root.fontFamily
-        font.pixelSize: 13 * root.ui
-        topPadding: 4 * root.ui
+      if (event.key === Qt.Key_CapsLock) root.capsGuess = !root.capsGuess
+      // Up/Down step through the accounts without leaving the field.
+      if (event.key === Qt.Key_Down) {
+        root.selectUser(root.current + 1)
+        event.accepted = true
+      } else if (event.key === Qt.Key_Up) {
+        root.selectUser(root.current - 1)
+        event.accepted = true
       }
     }
+  }
+  Connections {
+    target: root.pw.input
+    function onTextChanged() { if (root.pw.text.length > 0) root.loginFailed = false }
+  }
 
-    // Password field
-    Item {
-      id: fieldBox
-      anchors.horizontalCenter: parent.horizontalCenter
-      width: 400 * root.ui
-      height: 54 * root.ui
-      property real shakeOffset: 0
-      transform: Translate { x: fieldBox.shakeOffset }
+  // ---- accounts, bottom-left -----------------------------------------------
 
-      SequentialAnimation {
-        id: shake
-        NumberAnimation { target: fieldBox; property: "shakeOffset"; to: -14 * root.ui; duration: 50 }
-        NumberAnimation { target: fieldBox; property: "shakeOffset"; to: 12 * root.ui; duration: 70 }
-        NumberAnimation { target: fieldBox; property: "shakeOffset"; to: -8 * root.ui; duration: 70 }
-        NumberAnimation { target: fieldBox; property: "shakeOffset"; to: 5 * root.ui; duration: 60 }
-        NumberAnimation { target: fieldBox; property: "shakeOffset"; to: 0; duration: 60 }
-      }
-
-      Rectangle {
-        anchors.fill: parent
-        radius: height / 2
-        color: root.alpha(root.cBackground, 0.78)
-        border.width: 2 * root.ui
-        border.color: root.loginFailed ? root.cError : (password.activeFocus ? root.cAccent : root.alpha(root.cForeground, 0.25))
-        Behavior on border.color { ColorAnimation { duration: 200 } }
-      }
-
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 22 * root.ui
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.bootPassFor && !root.loginFailed ? "\uf09c" : "\uf023"
-        color: root.loginFailed ? root.cError : root.cMuted
-        font.family: root.fontFamily
-        font.pixelSize: 18 * root.ui
-      }
-
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 52 * root.ui
-        anchors.verticalCenter: parent.verticalCenter
-        visible: password.text.length === 0 && !root.authenticating
-        text: root.loginFailed ? "Wrong password, try again" : (root.bootPassFor ? "Unlocked at boot \u00b7 press Enter" : (root.userRunning ? "Password to unlock" : "Password"))
-        color: root.loginFailed ? root.cError : root.cMuted
-        font.family: root.fontFamily
-        font.pixelSize: 16 * root.ui
-      }
-
-      // Dots rather than the real field, so length shows but text does not.
-      Row {
-        id: dots
-        anchors.left: parent.left
-        anchors.leftMargin: 54 * root.ui
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 7 * root.ui
-        visible: !root.authenticating
-        Repeater {
-          model: Math.min(password.text.length, 22)
-          Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            width: 9 * root.ui
-            height: width
-            radius: width / 2
-            color: root.cBright
-            scale: 0
-            Component.onCompleted: scale = 1
-            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutBack } }
-          }
-        }
-        Rectangle {
-          width: 2 * root.ui
-          height: 22 * root.ui
-          color: root.cAccent
-          visible: password.activeFocus
-          anchors.verticalCenter: parent.verticalCenter
-          SequentialAnimation on opacity {
-            loops: Animation.Infinite
-            NumberAnimation { to: 0; duration: 530 }
-            NumberAnimation { to: 1; duration: 530 }
-          }
-        }
-      }
-
-      // Working indicator while PAM checks the password.
-      Row {
-        anchors.centerIn: parent
-        spacing: 10 * root.ui
-        visible: root.authenticating
-        Repeater {
-          model: 3
-          Rectangle {
-            required property int index
-            width: 10 * root.ui
-            height: width
-            radius: width / 2
-            color: root.cAccent
-            SequentialAnimation on opacity {
-              loops: Animation.Infinite
-              PauseAnimation { duration: index * 160 }
-              NumberAnimation { from: 0.25; to: 1; duration: 320 }
-              NumberAnimation { from: 1; to: 0.25; duration: 320 }
-              PauseAnimation { duration: (2 - index) * 160 }
-            }
-          }
-        }
-      }
-
-      Rectangle {
-        anchors.right: parent.right
-        anchors.rightMargin: 12 * root.ui
-        anchors.verticalCenter: parent.verticalCenter
-        visible: root.capsOn
-        height: 28 * root.ui
-        width: capsText.width + 18 * root.ui
-        radius: height / 2
-        color: root.alpha(root.cWarn, 0.18)
-        border.color: root.cWarn
-        border.width: 1
-        Text {
-          id: capsText
-          anchors.centerIn: parent
-          text: "⇪ CAPS"
-          color: root.cWarn
-          font.family: root.fontFamily
-          font.pixelSize: 12 * root.ui
-          font.bold: true
-        }
-      }
-
-      TextInput {
-        id: password
-        anchors.fill: parent
-        echoMode: TextInput.Password
-        color: "transparent"
-        selectionColor: "transparent"
-        selectedTextColor: "transparent"
-        cursorDelegate: Item {}
-        readOnly: root.authenticating
-        enabled: root.showsUi
-        focus: true
-        onTextChanged: if (text.length > 0) root.loginFailed = false
-
-        Keys.onPressed: (event) => {
-          if (event.text.length === 1 && event.text.toLowerCase() !== event.text.toUpperCase()) {
-            var upper = event.text !== event.text.toLowerCase()
-            var shift = (event.modifiers & Qt.ShiftModifier) !== 0
-            root.capsGuess = upper !== shift
-          }
-          if (event.key === Qt.Key_CapsLock) root.capsGuess = !root.capsGuess
-          if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
-            root.selectUser(root.current + 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
-            root.selectUser(root.current - 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Escape) {
-            text = ""
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            root.login()
-            event.accepted = true
-          }
-        }
-      }
-
-      MouseArea {
-        anchors.fill: parent
-        cursorShape: Qt.IBeamCursor
-        onClicked: password.forceActiveFocus()
-      }
+  AccountList {
+    id: accountList
+    st: formStyle
+    visible: root.users.length > 1 && root.showsUi
+    anchors.left: parent.left
+    anchors.bottom: parent.bottom
+    anchors.leftMargin: 36 * root.ui
+    anchors.bottomMargin: 36 * root.ui
+    accounts: root.accountRows
+    selected: root.userName
+    onChosen: (name) => {
+      for (var i = 0; i < root.users.length; i++) if (root.users[i].name === name) root.selectUser(i)
+      root.pw.focusInput()
     }
-
-    // Other accounts
-    Row {
-      anchors.horizontalCenter: parent.horizontalCenter
-      spacing: 14 * root.ui
-      visible: root.users.length > 1
-      topPadding: 10 * root.ui
-
-      Repeater {
-        model: root.users.length
-        Item {
-          id: chip
-          required property int index
-          readonly property var entry: root.users[index]
-          readonly property var entryLook: root.looks[entry.name] || null
-          readonly property bool selected: index === root.current
-          width: 44 * root.ui
-          height: width
-          opacity: selected ? 1 : (chipMouse.containsMouse ? 0.9 : 0.55)
-          scale: selected ? 1.0 : 0.88
-          Behavior on opacity { NumberAnimation { duration: 200 } }
-          Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-          UserAvatar {
-            anchors.fill: parent
-            ringWidth: 2 * root.ui
-            picture: chip.entryLook && chip.entryLook.avatar ? chip.entryLook.avatar : ""
-            faceIcon: chip.entry.icon
-            label: chip.entry.realName || chip.entry.name
-            // Each chip wears its own user's accent, a preview of their theme.
-            accent: chip.entryLook && chip.entryLook.colors && chip.entryLook.colors.accent ? chip.entryLook.colors.accent : root.cAccent
-            ink: chip.entryLook && chip.entryLook.colors && chip.entryLook.colors.background ? chip.entryLook.colors.background : root.cBackground
-            ring: chip.selected ? root.cBright : "transparent"
-            fontFamily: root.fontFamily
-          }
-
-          Rectangle {
-            visible: !!(chip.entryLook && chip.entryLook.running)
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: -2 * root.ui
-            width: 18 * root.ui
-            height: width
-            radius: width / 2
-            color: root.cBackground
-            border.color: root.cAccent
-            border.width: 1
-            Text {
-              anchors.centerIn: parent
-              text: "\uf023"
-              color: root.cAccent
-              font.family: root.fontFamily
-              font.pixelSize: 9 * root.ui
-            }
-          }
-
-          MouseArea {
-            id: chipMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.selectUser(chip.index)
-          }
-        }
-      }
-    }
-
-    Text {
-      anchors.horizontalCenter: parent.horizontalCenter
-      visible: root.users.length > 1
-      text: "Tab to switch user"
-      color: root.alpha(root.cForeground, 0.7)
-      font.family: root.fontFamily
-      font.pixelSize: 13 * root.ui
+    onTyped: (text) => {
+      root.pw.focusInput()
+      root.pw.text += text
     }
   }
 
-  // ---- footer ------------------------------------------------------------
+  // ---- machine, top-left; power, bottom-right ----------------------------
 
   Text {
     anchors.left: parent.left
-    anchors.bottom: parent.bottom
+    anchors.top: parent.top
     anchors.margins: 28 * root.ui
     textFormat: Text.PlainText
-    text: "  " + (root.demoHost || sddm.hostName) + (root.look && root.look.theme ? "     " + root.look.theme : "")
+    text: "  " + (root.demoHost || sddm.hostName)
     color: root.alpha(root.cForeground, 0.8)
     font.family: root.fontFamily
     font.pixelSize: 14 * root.ui
@@ -753,28 +537,29 @@ Rectangle {
   Row {
     anchors.right: parent.right
     anchors.bottom: parent.bottom
-    anchors.margins: 20 * root.ui
-    spacing: 6 * root.ui
+    anchors.margins: 28 * root.ui
+    spacing: 8 * root.ui
 
     PowerButton {
+      st: formStyle
       visible: sddm.canSuspend
       glyph: "\u{f04b2}"
       label: "Sleep"
-      ink: root.alpha(root.cForeground, 0.85); hoverInk: root.cAccent; fontFamily: root.fontFamily
       onClicked: sddm.suspend()
     }
     PowerButton {
+      st: formStyle
       visible: sddm.canReboot
       glyph: "\u{f0709}"
       label: "Restart"
-      ink: root.alpha(root.cForeground, 0.85); hoverInk: root.cAccent; fontFamily: root.fontFamily
       onClicked: sddm.reboot()
     }
     PowerButton {
+      st: formStyle
       visible: sddm.canPowerOff
       glyph: "\u{f0425}"
       label: "Shut down"
-      ink: root.alpha(root.cForeground, 0.85); hoverInk: root.cError; fontFamily: root.fontFamily
+      hoverInk: root.cError
       onClicked: sddm.powerOff()
     }
   }
