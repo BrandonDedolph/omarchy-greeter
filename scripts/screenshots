@@ -1,0 +1,155 @@
+#!/bin/bash
+# Make the README screenshots (docs/screenshots) from demo accounts, so they
+# never show a real account:
+#   alex   Alex Rivera  Tokyo Night       signed in
+#   sam    Sam Chen     Catppuccin Latte  signed in (its session is locked)
+#   jordan Jordan Park  Gruvbox
+# Looks come from Omarchy's stock themes in /usr/share/omarchy/themes.
+#
+#   scripts/screenshots [monitor]
+#
+# The login screens are the real SDDM theme in sddm-greeter's test mode: a
+# window opens on the monitor (default: the focused one) for a few seconds
+# each and is captured with grim, so run it from an Omarchy desktop with the
+# monitor at 16:9. The lock screen is rendered off-screen from the real lock
+# layout (lib/patch-lock.py on Omarchy's lock) with stand-ins for Omarchy's
+# style modules (tests/lock_harness).
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+out=$root/docs/screenshots
+themes=/usr/share/omarchy/themes
+work=${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-greeter-screenshots
+monitor=${1:-$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')}
+die() { echo "screenshots: $*" >&2; exit 1; }
+for tool in magick grim hyprctl jq sddm-greeter-qt6 /usr/lib/qt6/bin/qml; do
+  command -v "$tool" >/dev/null || die "needs $tool"
+done
+[[ -n $monitor ]] || die "no monitor"
+read -r mon_x mon_y mon_w mon_h < <(hyprctl monitors -j | jq -r --arg m "$monitor" '.[] | select(.name == $m) | "\(.x) \(.y) \(.width) \(.height)"')
+[[ -n ${mon_w:-} ]] || die "no monitor named $monitor"
+scale=$(( mon_w >= 3840 ? 2 : 1 ))
+cursor=$(hyprctl cursorpos | tr -d ' ')
+move_cursor() { hyprctl dispatch "hl.dsp.cursor.move({ x = $1, y = $2 })" >/dev/null 2>&1 || true; }
+
+rm -rf "$work" && mkdir -p "$work/looks" "$work/state" "$out"
+
+# ---- demo accounts --------------------------------------------------------
+
+accounts=(alex:tokyo-night sam:catppuccin-latte jordan:gruvbox)
+for entry in "${accounts[@]}"; do
+  name=${entry%%:*} theme=${entry#*:}
+  look=$work/looks/$name
+  mkdir -p "$look"
+  src=$(find "$themes/$theme/backgrounds" -maxdepth 1 -type f \( -name '*.jpg' -o -name '*.png' -o -name '*.webp' \) | sort | head -n1)
+  [[ -n $src ]] || die "no background in $themes/$theme"
+  magick "$src" -resize '3840x2160^' -gravity center -extent 3840x2160 -strip -quality 92 "$look/background.jpg"
+  magick "$look/background.jpg" -resize '640x640>' -blur 0x14 -resize 1920x1920 \
+    -attenuate 0.35 +noise Uniform -strip -sampling-factor 1x1 -quality 92 "$look/background-blur.jpg"
+  cp "$themes/$theme/colors.toml" "$look/colors.toml"
+  echo "$theme" > "$look/theme.name"
+  # Scale 2 on the capture monitor: a 4K monitor then lays out like the
+  # 1920x1080 pictures it is shrunk to.
+  printf '{"fontBaseSize": 12, "monitors": {"%s": {"scale": %s}}}\n' "$monitor" "$scale" > "$look/display.json"
+  date +%s > "$look/updated"
+done
+echo 2 > "$work/looks/alex/session"
+echo 3 > "$work/looks/sam/session"
+
+# ---- login screens ----------------------------------------------------------
+
+cp -r "$root/theme" "$work/theme"
+sed -i "s|^dataDir=.*|dataDir=$work/looks|" "$work/theme/theme.conf"
+printf 'demoUsers=alex:Alex Rivera,sam:Sam Chen,jordan:Jordan Park\ndemoHost=omarchy\n' >> "$work/theme/theme.conf"
+
+stop_greeter() {
+  local pid
+  for pid in $(pgrep -f "sddm-greeter-qt6 --test-[m]ode --theme $work/theme" || true); do kill "$pid" 2>/dev/null || true; done
+}
+cleanup() { stop_greeter; move_cursor "${cursor%,*}" "${cursor#*,}"; }
+trap cleanup EXIT
+
+shoot_login() {  # shoot_login <account> <file>
+  # Selected the way a lock screen's "switch user" selects it: it shows at once.
+  echo "$(date +%s) $1" > "$work/looks/alex/switch-to"
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$monitor\" })" >/dev/null 2>&1 || true
+  (cd "$work" && QML_XHR_ALLOW_FILE_READ=1 setsid sddm-greeter-qt6 --test-mode --theme "$work/theme" > "$work/greeter-$1.log" 2>&1 &)
+  sleep 3
+  # The pointer, parked in the corner, falls off the picture.
+  move_cursor $(( mon_x + mon_w - 1 )) $(( mon_y + mon_h - 1 ))
+  sleep 1
+  grim -o "$monitor" "$work/raw.png"
+  stop_greeter
+  sleep 0.5
+  magick "$work/raw.png" -resize 1920x1080 -strip -quality 90 "$out/$2"
+  echo "  $out/$2"
+}
+echo "Login screens on $monitor (windows open and close for a few seconds each):"
+shoot_login alex login-alex.jpg
+shoot_login sam login-sam-locked.jpg
+shoot_login jordan login-jordan.jpg
+rm -f "$work/looks/alex/switch-to"
+
+# ---- lock screen --------------------------------------------------------------
+
+echo "Lock screen (off-screen):"
+lock=$work/lock
+cp -r /usr/share/omarchy/shell/plugins/lock "$lock"
+python3 -I "$root/lib/patch-lock.py" "$lock" "omarchy-greeter:primary-lock" "$root/lock" "$root/theme" >/dev/null
+# The demo account's published files, not the machine's.
+sed -i "s|/var/lib/omarchy-greeter/|$work/state/|g; s|/etc/hostname|$work/hostname|" "$lock/GreeterLockView.qml"
+echo omarchy > "$work/hostname"
+mkdir -p "$work/state/alex"
+cp "$work/looks/alex/background-blur.jpg" "$work/state/alex/"
+echo "$work/looks/alex/background.jpg 1" > "$work/state/alex/source"
+# Stand-ins (tests/lock_harness), but with a FileView that reads files.
+cp -r "$root/tests/lock_harness" "$work/harness"
+cat > "$work/harness/Quickshell/Io/FileView.qml" <<'QML'
+import QtQuick
+QtObject {
+  property string path: ""
+  property bool blockLoading: false
+  property bool printErrors: true
+  property bool watchChanges: false
+  signal fileChanged()
+  function reload() {}
+  function text() {
+    if (!path) return ""
+    var xhr = new XMLHttpRequest()
+    xhr.open("GET", "file://" + path, false)
+    xhr.send()
+    return String(xhr.responseText || "")
+  }
+}
+QML
+cat > "$lock/shot.qml" <<QML
+import QtQuick
+import QtQuick.Window
+Window {
+  id: win
+  width: 1920
+  height: 1080
+  visible: true
+  LockView {
+    anchors.fill: parent
+    backgroundPath: "$work/looks/alex/background.jpg"
+    inputEnabled: true
+    loadBackground: true
+    currentUser: ({ name: "alex", realName: "Alex Rivera" })
+    accounts: [{ name: "alex", realName: "Alex Rivera", signedIn: true },
+               { name: "sam", realName: "Sam Chen", signedIn: true },
+               { name: "jordan", realName: "Jordan Park", signedIn: false }]
+  }
+  Timer {
+    interval: 1500
+    running: true
+    onTriggered: win.contentItem.grabToImage(function(result) {
+      result.saveToFile("$work/lock.png")
+      Qt.quit()
+    })
+  }
+}
+QML
+(cd "$lock" && QML_XHR_ALLOW_FILE_READ=1 QT_QPA_PLATFORM=offscreen timeout 60 \
+  /usr/lib/qt6/bin/qml -I "$work/harness" shot.qml > "$work/lock.log" 2>&1) || { cat "$work/lock.log"; die "lock render failed"; }
+magick "$work/lock.png" -strip -quality 90 "$out/lock.jpg"
+echo "  $out/lock.jpg"

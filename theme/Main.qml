@@ -570,21 +570,21 @@ Rectangle {
 
     PowerButton {
       st: formStyle
-      visible: sddm.canSuspend
+      visible: sddm.canSuspend || root.demoUsers !== ""
       glyph: "\u{f04b2}"
       label: "Sleep"
       onClicked: sddm.suspend()
     }
     PowerButton {
       st: formStyle
-      visible: sddm.canReboot
+      visible: sddm.canReboot || root.demoUsers !== ""
       glyph: "\u{f0709}"
       label: "Restart"
       onClicked: sddm.reboot()
     }
     PowerButton {
       st: formStyle
-      visible: sddm.canPowerOff
+      visible: sddm.canPowerOff || root.demoUsers !== ""
       glyph: "\u{f0425}"
       label: "Shut down"
       hoverInk: root.cError

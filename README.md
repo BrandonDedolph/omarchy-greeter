@@ -2,17 +2,22 @@
 
 A multi-user login screen and lock screen for [Omarchy](https://omarchy.org). For computers that more than one person uses, or one person with separate accounts (work and personal, say).
 
-- **Each account looks like its own desktop.** The login screen shows the selected account's Omarchy background (video too, if you allow it) and colors itself from that account's theme. Switching accounts wipes to the next background with the same reveal the desktop uses.
+- **Works like Windows.** Your account in the middle, every account on the machine in the bottom-left, Sleep, Restart and Shut down in the bottom-right. The lock screen is the same screen: you sign back in right there, or pick another account to switch user while your session stays locked and running.
+- **Each account looks like its own desktop.** The login screen shows the selected account's Omarchy background, blurred (video too, if you allow it), and colors itself from that account's theme. Switching accounts wipes to the next background with the same reveal the desktop uses.
 - **Sized like the desktop.** Each account's monitor scale and Omarchy font size carry over to the login screen.
-- **Knows who is signed in.** Accounts with a session running read **Locked · resumes session**; the rest read **Log in**.
-- **Multi-user lock screen.** The lock shows who it belongs to, who else is signed in, and **Switch user**, which opens the login screen while your session stays locked. Coming back takes one password.
-- **One monitor.** Optionally show the login and lock forms on one monitor only and keep the rest black.
+- **Knows who is signed in.** Accounts with a session running say **Signed in**, straight from the system's session list.
+- **Keyboard friendly.** Tab moves through the password box, the accounts and the power buttons, with a clear focus ring; Up and Down pick accounts.
+- **One monitor.** Optionally show the login and lock screens on one monitor only and keep the rest black.
 - **One password at boot (optional).** On an encrypted disk, the disk password can also log you in once, so you type one password instead of two (see [security](#one-password-at-boot)).
 - **Settings in the Omarchy menu**, under **Setup > Login & Lock**, plus an `omarchy-greeter` command for the same and for managing accounts.
 
-| Tokyo Night account | Catppuccin Latte account, signed in | Gruvbox account |
+![The lock screen: the locked account in the middle with its password box, every account bottom-left, Sleep, Restart and Shut down bottom-right, over the account's blurred Tokyo Night background](docs/screenshots/lock.jpg)
+
+| Tokyo Night account | Catppuccin Latte account, signed in | Gruvbox account, not signed in |
 |---|---|---|
-| ![Login screen for an account with the Tokyo Night theme](docs/screenshots/login-alex.jpg) | ![Login screen for a signed-in account with the Catppuccin Latte theme, showing Locked · resumes session](docs/screenshots/login-sam-locked.jpg) | ![Login screen for an account with the Gruvbox theme](docs/screenshots/login-jordan.jpg) |
+| ![Login screen for a signed-in account with the Tokyo Night theme](docs/screenshots/login-alex.jpg) | ![Login screen for a signed-in account with the Catppuccin Latte theme, showing Signed in · locked](docs/screenshots/login-sam-locked.jpg) | ![Login screen for an account with the Gruvbox theme](docs/screenshots/login-jordan.jpg) |
+
+All four pictures use demo accounts and Omarchy's stock themes (`scripts/screenshots` makes them).
 
 <img src="docs/screenshots/menu.png" alt="Setup > Login & Lock in the Omarchy menu" width="276" align="right">
 
@@ -62,7 +67,7 @@ From the Omarchy menu: **Setup > Login & Lock > Accounts > Add**. Or in a termin
 omarchy-greeter user add
 ```
 
-It asks for the account name, the name to show on the login screen, whether the account should be an admin, and a password. The new account starts from Omarchy's defaults (`/etc/skel`), and Omarchy finishes setting it up at its first login. To sign in as it, lock your screen (<kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>L</kbd>), choose **Switch user**, and pick it.
+It asks for the account name, the name to show on the login screen, whether the account should be an admin, and a password. The new account starts from Omarchy's defaults (`/etc/skel`), and Omarchy finishes setting it up at its first login. To sign in as it, lock your screen (<kbd>Super</kbd>+<kbd>Ctrl</kbd>+<kbd>L</kbd>) and pick it in the account list, bottom-left.
 
 ## Admin rights
 
@@ -85,6 +90,7 @@ Every feature can be switched on or off. Machine-wide settings ask for an admin 
 | Monitor for the login and lock forms | Monitor | `omarchy-greeter monitor [focused\|all\|<name>]` | machine | all monitors |
 | One password at boot, for your account | Boot Login | `omarchy-greeter boot-pass [on\|off] [account]` | machine | off |
 | Video backgrounds on the login screen | Video Login | `omarchy-greeter video [on\|off]` | machine | off |
+| Login screen turns the displays off after | | `omarchy-greeter screen-off <seconds>` (0: never) | machine | 120 seconds |
 | Multi-user lock screen | User Lock | `omarchy-greeter lock [on\|off]` | you | on |
 | Your look on the login screen | My Look | `omarchy-greeter publish [on\|off]` | you | on |
 | Updates with `omarchy update` | | `omarchy-greeter auto-update [on\|off]` | you | on |
@@ -122,9 +128,11 @@ It works by adding one line to the top of `/etc/pam.d/sddm` (`pam_exec` of `/usr
 - **The login screen** is an SDDM theme (`theme/`). SDDM runs it as the `sddm` user, who cannot read home folders. So each account publishes its look (a screen-sized still of its background, theme colors, font size, monitor layout, avatar from `~/.face`) to its own private folder, `/var/lib/omarchy-greeter/<account>/`. This happens from a systemd user unit whenever the theme, background, monitors or font change, and at boot for every account (`omarchy-greeter-sync`).
 - **The login screen only reads checked copies.** The login screen receives every password, so it never opens an account's own files. A root service (`publish-view`) checks each published file (only regular files of a capped size, text matched against what is expected, display sizes parsed and rebuilt), re-encodes images as an unprivileged user, and copies the result into `/var/lib/omarchy-greeter/.view/`, readable only by the login screen. One account cannot freeze, crash or read files through the login screen another account uses. Video backgrounds are the exception, which is why they are off by default: when allowed, a video is repackaged as an unprivileged user, but the login screen still decodes the account's video stream.
 - **The login screen's compositor** uses the same monitor modes as the desktop and stays in SDR, so moving between them causes no monitor blackout.
-- **The lock screen** is Omarchy's own lock plugin, cloned into `~/.config/omarchy/plugins/<account>.lock` and patched (`lib/patch-lock.py`). The clone is rebuilt from Omarchy's current lock before the desktop starts whenever Omarchy's lock or the patch changes, so Omarchy's lock fixes keep arriving. If an Omarchy update ever changes the lock so much that the patch no longer fits, you get Omarchy's own lock and a notification. Nothing breaks.
+- **The lock screen** is Omarchy's own lock plugin, cloned into `~/.config/omarchy/plugins/<account>.lock` and patched (`lib/patch-lock.py`): Omarchy's lock logic (password checks, fingerprint, idle blanking) stays as it is, and only the layout is ours (`lock/GreeterLockView.qml`, sharing the login screen's form in `theme/`). The clone is rebuilt from Omarchy's current lock before the desktop starts whenever Omarchy's lock or the patch changes, so Omarchy's lock fixes keep arriving. If our layout fails to load, Omarchy's own layout shows instead; if an Omarchy update ever changes the lock so much that the patch no longer fits, or the patched lock does not start, you get Omarchy's own lock and a notification. You are never left unlocked.
+- **Signed in** comes from logind: a root service refreshes it whenever a session starts or ends (`omarchy-greeter-sessions.path`).
+- **Backgrounds are blurred once**, when an account publishes a new one, not on every frame; that keeps the screens free of banding and seams.
 - **A session out of sight is always locked.** If another account or the login screen comes to the front while a session is unlocked, that session locks itself (`omarchy-greeter-guard`, which works with either lock screen).
-- **Switching back takes one password.** When you log back into your locked session from the login screen, SDDM asks logind to unlock it, and the lock screen follows once your session is in front again.
+- **Switching back takes one password.** When you log back into your locked session from the login screen, SDDM asks logind to unlock it, and the lock screen follows once your session is in front again. Your own lock screen checks your password itself, as Omarchy's does, so unlocking where you left off never leaves your session.
 
 ## Development
 
@@ -136,6 +144,8 @@ sed -i 's|^dataDir=.*|dataDir=/path/to/sample-looks|' /tmp/greeter-test/theme.co
 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
   sddm-greeter-qt6 --test-mode --theme /tmp/greeter-test
 ```
+
+`scripts/screenshots` remakes the README pictures from demo accounts (Omarchy's stock themes, never a real account): the login screens in SDDM's test mode on the focused monitor, the lock screen off-screen.
 
 `make check` runs the static checks (bash syntax, shellcheck, QML and Lua syntax) and `make test` the tests, which run in temporary folders with stand-ins for root and Omarchy, so they never touch the real system. Both run on every push, and weekly against Omarchy's latest lock screen, so an Omarchy change that breaks the patch shows up before users hit it. Set `OMARCHY_LOCK_SOURCES=/path/to/omarchy/shell/plugins/lock` to also test the patch against another copy of the lock.
 
