@@ -95,6 +95,7 @@ unchanged=0
 if [[ -n $source_key && -r $DEST/source && $(<"$DEST/source") == "$source_key" && -e $DEST/background.jpg ]]; then
   unchanged=1
   cp "$DEST/background.jpg" "$work/background.jpg"
+  [[ -e $DEST/background-blur.jpg ]] && cp "$DEST/background-blur.jpg" "$work/background-blur.jpg"
   video=$(cat "$DEST/video" 2>/dev/null || true)
   [[ -n $video && -e $DEST/$video ]] || video=""
 fi
@@ -123,6 +124,14 @@ if (( ! unchanged )) && [[ -n $source_key ]]; then
         log "could not convert $background"
       ;;
   esac
+fi
+# The blurred copy the lock and login screens show behind the form: blurred
+# small with a real Gaussian, scaled up smoothly, with a little noise so the
+# soft gradients do not band. (A live blur on screen drew blotches and rings.)
+if [[ -e $work/background.jpg && ! -e $work/background-blur.jpg ]]; then
+  magick "$work/background.jpg" -resize '640x640>' -blur 0x14 -resize 1920x1920 \
+    -attenuate 0.35 +noise Uniform -strip -sampling-factor 1x1 -quality 92 "$work/background-blur.jpg" ||
+    log "could not blur the background"
 fi
 [[ -n $source_key ]] && printf '%s\n' "$source_key" > "$work/source"
 
@@ -203,7 +212,7 @@ if (( unchanged )) && [[ -r $DEST/updated ]]; then cp "$DEST/updated" "$work/upd
 # Move each file into place on its own, so the greeter never sees a half-
 # written image, then drop what this run no longer publishes.
 chmod 600 "$work"/*
-for name in colors.toml theme.name background.jpg avatar.png display.json monitors source video updated; do
+for name in colors.toml theme.name background.jpg background-blur.jpg avatar.png display.json monitors source video updated; do
   if [[ -e $work/$name ]]; then
     mv -f "$work/$name" "$DEST/$name"
   elif [[ $name != video && $name != updated ]]; then

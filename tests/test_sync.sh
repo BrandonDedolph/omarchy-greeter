@@ -18,6 +18,19 @@ if command -v ffmpeg >/dev/null; then
   equal "video kept on resync" "background.mp4" "$(cat "$pub/$me/video")"
   check "video file kept" test -s "$pub/$me/background.mp4"
   check "still made from the video" test -s "$pub/$me/background.jpg"
+  check "blurred copy made" test -s "$pub/$me/background-blur.jpg"
+fi
+
+# A still background: the blurred copy is made once and kept while unchanged.
+if command -v magick >/dev/null; then
+  magick -size 800x450 gradient:'#203040-#a0b0c0' "$home/bg.png"
+  ln -sf "$home/bg.png" "$state/background"
+  check "sync with a still background" sync --offline
+  check "blurred copy of the still" test -s "$pub/$me/background-blur.jpg"
+  equal "blurred copy scaled to fit 1920" "1920x1080" "$(magick identify -format %wx%h "$pub/$me/background-blur.jpg")"
+  before=$(md5sum < "$pub/$me/background-blur.jpg")
+  sync --offline >/dev/null 2>&1
+  equal "blurred copy kept while unchanged" "$before" "$(md5sum < "$pub/$me/background-blur.jpg")"
 fi
 
 # Files are private to the account.

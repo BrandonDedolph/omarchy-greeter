@@ -180,9 +180,11 @@ class PublishView(unittest.TestCase):
     @unittest.skipUnless(have("magick"), "needs ImageMagick")
     def test_images_are_reencoded_and_checked(self):
         self.write("background.jpg", self.image("jpg"))
+        self.write("background-blur.jpg", self.image("jpg"))
         self.write("avatar.png", self.image("png", "300x300"))
         view = self.publish()
         self.assertTrue((view / "background.jpg").read_bytes().startswith(b"\xff\xd8\xff"))
+        self.assertTrue((view / "background-blur.jpg").read_bytes().startswith(b"\xff\xd8\xff"))
         avatar = view / "avatar.png"
         self.assertTrue(avatar.read_bytes().startswith(b"\x89PNG"))
         size = subprocess.run(["magick", "identify", "-format", "%wx%h", str(avatar)],

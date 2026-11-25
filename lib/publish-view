@@ -213,7 +213,7 @@ def sandboxed(cmd, data=None, timeout=90, limit=64 * MIB):
 def reencode_jpeg(data):
     if data is None or not data.startswith(b"\xff\xd8\xff"):
         return None
-    return sandboxed(["magick", *MAGICK_LIMITS, "jpeg:-", "-strip", "-quality", "90", "jpeg:-"], data)
+    return sandboxed(["magick", *MAGICK_LIMITS, "jpeg:-", "-strip", "-sampling-factor", "1x1", "-quality", "92", "jpeg:-"], data)
 
 
 def reencode_png(data):
@@ -400,6 +400,7 @@ def publish(name, src, view):
         view.write("monitors", monitor_lines(display))
 
     media(view, src, "background.jpg", 40 * MIB, reencode_jpeg)
+    media(view, src, "background-blur.jpg", 8 * MIB, reencode_jpeg)
     media(view, src, "avatar.png", 8 * MIB, reencode_png)
 
     video = (text(src.read("video", TEXT_LIMITS["video"])) or "").strip()
