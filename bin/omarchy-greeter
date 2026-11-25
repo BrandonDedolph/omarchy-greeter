@@ -118,7 +118,9 @@ cmd_boot_pass() {
   case $mode in
     "") [[ ",$list," == *",$account,"* ]] && echo on || echo off ;;
     on|off)
-      [[ $account =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && getent passwd "$account" >/dev/null || die "no account named $account"
+      [[ $account =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "not an account name: $account"
+      # Turning it off works for an account that was deleted since.
+      [[ $mode == off ]] || getent passwd "$account" >/dev/null || die "no account named $account"
       IFS=, read -r -a current <<<"$list"
       for a in "${current[@]}"; do [[ -n $a && $a != "$account" ]] && new+=("$a"); done
       [[ $mode == on ]] && new+=("$account")
@@ -140,18 +142,19 @@ cmd_boot_pass() {
 cmd_video() {
   case ${1:-} in
     "") [[ $(conf_get video) == "yes" ]] && echo on || echo off ;;
-    on) as_root _set video yes; echo "Video backgrounds are allowed on the login screen." ;;
-    off) as_root _set video no; echo "The login screen shows a still of video backgrounds." ;;
+    on) as_root _video yes; echo "Video backgrounds are allowed on the login screen." ;;
+    off) as_root _video no; echo "The login screen shows a still of video backgrounds." ;;
     toggle) if [[ $(cmd_video) == "on" ]]; then cmd_video off; else cmd_video on; fi ;;
     *) die "usage: omarchy-greeter video [on|off|toggle]" ;;
   esac
-  # Re-check every look now, so the change shows at the next login screen.
-  [[ -n ${1:-} ]] && as_root _refresh-views || true
 }
 
-root_refresh_views() {
+# One root step (one password prompt): set it, then re-check every look so
+# the change shows at the next login screen.
+root_video() {
   (( EUID == 0 )) || die "must run as root"
-  systemctl restart omarchy-greeter-dirs.service
+  root_set video "${1:-}"
+  systemctl restart --no-block omarchy-greeter-dirs.service
 }
 
 # ---- per-account settings -----------------------------------------------
@@ -360,7 +363,7 @@ cmd_update() {
     --check) check=1 ;;
     *) die "usage: omarchy-greeter update [--check]" ;;
   esac
-  local installed json name pkg_url sig_url latest work file info pkgname pkgver
+  local installed json name pkg_url sig_url latest file info pkgname pkgver
   installed=$(pacman -Q omarchy-greeter 2>/dev/null | awk '{print $2}')
   [[ -n $installed ]] || die "omarchy-greeter is not installed as a package"
 
@@ -393,8 +396,10 @@ cmd_update() {
   sig_url="$pkg_url.sig"
 
   echo "Updating omarchy-greeter $installed -> $latest"
-  work=$(mktemp -d)
-  trap 'rm -rf "$work"' EXIT
+  # Global, so the exit trap still sees it after this function returns.
+  UPDATE_WORK=$(mktemp -d)
+  trap 'rm -rf "${UPDATE_WORK:-}"' EXIT
+  local work=$UPDATE_WORK
   file="$work/$name"
   curl -fsSL --proto '=https' --max-time 300 -o "$file" "$pkg_url" || die "download failed"
   curl -fsSL --proto '=https' --max-time 60 -o "$file.sig" "$sig_url" || die "signature download failed"
@@ -426,11 +431,12 @@ cmd_auto_update() {
 # newer omarchy-greeter, and only then install it.
 root_install() {
   (( EUID == 0 )) || die "must run as root"
-  local file=${1:-} sig=${2:-} want=${3:-} dir info pkgname pkgver installed
+  local file=${1:-} sig=${2:-} want=${3:-} info pkgname pkgver installed
   [[ -f $file && -f $sig && $want =~ ^[0-9]+(\.[0-9]+)*-[0-9]+$ ]] || die "usage: _install <package> <signature> <version>"
-  dir=$(mktemp -d /var/cache/omarchy-greeter-update.XXXXXX 2>/dev/null || mktemp -d)
+  INSTALL_DIR=$(mktemp -d /var/cache/omarchy-greeter-update.XXXXXX 2>/dev/null || mktemp -d)
+  local dir=$INSTALL_DIR
   chmod 700 "$dir"
-  trap 'rm -rf "$dir"' EXIT
+  trap 'rm -rf "${INSTALL_DIR:-}"' EXIT
   head -c $((50 * 1024 * 1024)) -- "$file" > "$dir/package.pkg.tar.zst" < /dev/null
   head -c 65536 -- "$sig" > "$dir/package.sig" < /dev/null
   ssh-keygen -Y verify -f "$SIGNERS" -I omarchy-greeter-release -n omarchy-greeter-release \
@@ -492,7 +498,7 @@ case ${1:-status} in
     ;;
   # Root-side steps, reached only through as_root/sudo above.
   _set) shift; root_set "$@" ;;
-  _refresh-views) root_refresh_views ;;
+  _video) shift; root_video "$@" ;;
   _install) shift; root_install "$@" ;;
   _user-add) shift; root_user_add "$@" ;;
   _user-admin) shift; root_user_admin "$@" ;;

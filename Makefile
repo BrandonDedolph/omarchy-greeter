@@ -1,5 +1,5 @@
-# Installs omarchy-greeter into $(DESTDIR); both PKGBUILDs call this, so
-# the list of files lives in one place.
+# Installs omarchy-greeter into $(DESTDIR). The PKGBUILD (and the AUR one
+# scripts/release generates) call this, so the list of files lives in one place.
 DESTDIR ?=
 
 .PHONY: install check

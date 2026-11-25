@@ -181,7 +181,10 @@ rep("Service.qml", '''  property string pendingPassword: ""
     } else if (event === "unlock") {
       // Only for a lock that is up (or coming back right after a shell
       // restart); an unlock sent while unlocked must not open a later lock.
-      if (!root.lockRequested && !root.currentlyLocked() && !root.justStarted()) return
+      if (!root.lockRequested && !root.currentlyLocked() && !root.justStarted()) {
+        root.forgetLogindUnlock()
+        return
+      }
       root.pendingLogindUnlockAt = Date.now()
       if (root.sessionActive) logindUnlockTimer.restart()
     }
@@ -231,8 +234,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // new lock (except the lock coming back after a shell restart, which the
   // replayed unlock is for).
   onLockRequestedChanged: {
-    if (!root.lockRequested) root.pendingLogindUnlockAt = 0
-    else if (!root.justStarted()) root.forgetLogindUnlock()
+    if (!root.lockRequested || !root.justStarted()) root.forgetLogindUnlock()
   }
 
   Process {

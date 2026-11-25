@@ -14,7 +14,7 @@ Rectangle {
 
   readonly property string dataDir: (typeof config !== "undefined" && config.dataDir) ? String(config.dataDir) : "/var/lib/omarchy-greeter/.view"
   readonly property string settingsFile: (typeof config !== "undefined" && config.settingsFile) ? String(config.settingsFile) : "/etc/omarchy-greeter.conf"
-  readonly property string bootFlag: (typeof config !== "undefined" && config.bootFlag) ? String(config.bootFlag) : "/run/omarchy-greeter/boot-unlocked"
+  readonly property string bootFlag: (typeof config !== "undefined" && config.bootFlag) ? String(config.bootFlag) : "/run/omarchy-greeter/boot-unlock-hint"
 
   // ---- primary monitor ---------------------------------------------------
   //
@@ -34,7 +34,10 @@ Rectangle {
   // Set while the first login after a typed disk password may skip the
   // account password (see boot-unlock-auth). PAM decides; this only changes
   // what the field says.
-  property bool bootUnlocked: false
+  // The accounts the boot pass is armed for (a world-readable hint next to
+  // the root-only mark; the PAM step decides, this only shows it).
+  property var bootAccounts: []
+  readonly property bool bootUnlocked: bootAccounts.indexOf(userName) >= 0
   // The boot pass only starts new sessions (boot-unlock-auth enforces it).
   readonly property bool bootPassFor: bootUnlocked && !userRunning
 
@@ -43,7 +46,10 @@ Rectangle {
     running: root.showsUi
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.readText(root.bootFlag, function(text) { root.bootUnlocked = text.trim().length > 0 })
+    onTriggered: root.readText(root.bootFlag, function(text) {
+      text = text.trim()
+      root.bootAccounts = /^[a-z_][a-z0-9_-]*(,[a-z_][a-z0-9_-]*)*$/.test(text) ? text.split(",") : []
+    })
   }
 
   Component.onCompleted: {

@@ -149,8 +149,10 @@ python3 -I "$PATCH" "$work" "$MARK" ||
   give_up "the built-in lock changed and the patch no longer fits" \
     "Omarchy's lock changed and the multi-user lock could not be applied; using the built-in lock (form on every monitor). Backgrounded sessions still lock."
 # A lock that fails to parse means no lock at all, so check before using it.
-if [[ -x /usr/lib/qt6/bin/qmllint ]] &&
-  /usr/lib/qt6/bin/qmllint "$work/Service.qml" "$work/LockView.qml" 2>&1 | grep -qE '\[syntax\]'; then
+# (qmllint exits non-zero on any warning, so read its output, not its status.)
+lint=""
+[[ -x /usr/lib/qt6/bin/qmllint ]] && lint=$(/usr/lib/qt6/bin/qmllint "$work/Service.qml" "$work/LockView.qml" 2>&1 || true)
+if grep -qE '\[syntax\]' <<<"$lint"; then
   give_up "the patched lock does not parse" "The multi-user lock did not build; using the built-in lock."
 fi
 

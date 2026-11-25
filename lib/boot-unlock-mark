@@ -19,13 +19,15 @@ set -uo pipefail
 
 FLAG_DIR=/run/omarchy-greeter
 FLAG=$FLAG_DIR/boot-unlocked
+# The same accounts, readable by the login screen so it can say "press Enter".
+HINT=$FLAG_DIR/boot-unlock-hint
 STATUS=$FLAG_DIR/boot-unlock-status
 # Written the first time this runs on a boot; never re-arm while it exists.
 DONE=$FLAG_DIR/boot-unlock-armed
 WINDOW=600
 
 install -d -m 755 -o root -g root "$FLAG_DIR"
-rm -f "$FLAG"
+rm -f "$FLAG" "$HINT"
 status() { printf '%s\n' "$*" > "$STATUS.tmp" && chmod 644 "$STATUS.tmp" && mv -f "$STATUS.tmp" "$STATUS"; }
 off() { echo "boot-unlock: $*"; status "off: $*"; exit 0; }
 
@@ -47,12 +49,15 @@ uptime=$(cut -d. -f1 /proc/uptime)
 [[ $uptime =~ ^[0-9]+$ ]] && (( uptime < 300 )) || off "not a fresh boot (uptime ${uptime}s)"
 
 # SDDM autologin (Omarchy sets one up for some installs).
-autologin=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf /etc/sddm.conf.d/*.conf 2>/dev/null |
+# Read in SDDM's order: /etc/sddm.conf has the last word.
+autologin=$(cat /usr/lib/sddm/sddm.conf.d/*.conf /etc/sddm.conf.d/*.conf /etc/sddm.conf 2>/dev/null |
   awk '/^[[:space:]]*\[/{s=$0; gsub(/[[:space:]]/,"",s)} s=="[Autologin]" && /^[[:space:]]*User[[:space:]]*=/ {sub(/^[^=]*=[[:space:]]*/,""); u=$0} END{print u}')
 [[ -z $autologin ]] || off "SDDM logs $autologin in automatically"
 
 cmdline=$(</proc/cmdline)
-[[ $cmdline == *cryptkey=* || $cmdline == *rd.luks.key=* ]] && off "the disk unlocks with a key file (kernel command line)"
+[[ $cmdline =~ (^|[[:space:]])(cryptkey|rd\.luks\.key|luks\.key)= ]] && off "the disk unlocks with a key file (kernel command line)"
+[[ $cmdline =~ (^|[[:space:]])(rd\.)?luks\.options=[^[:space:]]*(keyfile|try-empty-password|tpm2|fido2|pkcs11) ]] &&
+  off "the kernel command line gives the disk another way to unlock"
 if [[ -e /etc/crypttab.initramfs ]] &&
   awk '!/^[[:space:]]*(#|$)/ && (($3 != "" && $3 != "none" && $3 != "-") || $4 ~ /(keyfile|try-empty-password|tpm2|fido2|pkcs11)/) {found=1} END{exit !found}' /etc/crypttab.initramfs; then
   off "/etc/crypttab.initramfs names a key file or token"
@@ -62,14 +67,17 @@ if [[ -d /etc/cryptsetup-keys.d ]] && [[ -n $(ls -A /etc/cryptsetup-keys.d 2>/de
 fi
 # FILES= in mkinitcpio's config, read the way mkinitcpio reads it (array or
 # string, one line or several).
+# A sentinel proves the configs were read to the end; anything else (a
+# config that fails to source) counts as "maybe a key file".
 bundled=$(
+  set +eu
   FILES=()
   for f in /etc/mkinitcpio.conf /etc/mkinitcpio.conf.d/*.conf; do
-    [[ -f $f ]] && source "$f" >/dev/null 2>&1
+    [[ -f $f ]] && source "$f" >/dev/null 2>&1 < /dev/null
   done
-  printf '%s' "${FILES[*]}" | tr -d '[:space:]'
+  printf 'ok:%s' "${FILES[*]}" | tr -d '[:space:]'
 )
-[[ -z $bundled ]] || off "the initramfs bundles extra files (FILES=), possibly a key file"
+[[ $bundled == "ok:" ]] || off "the initramfs bundles extra files (FILES=), possibly a key file"
 
 source=$(findmnt -no SOURCE / | sed 's/\[.*//')
 [[ $source == /dev/mapper/* ]] || off "/ is not on dm-crypt ($source)"
@@ -81,9 +89,11 @@ tokens=$(cryptsetup luksDump --dump-json-metadata "$device" 2>/dev/null | jq '.t
 
 # The mark: when it was set, and who may use it.
 printf '%s %s\n' "$uptime" "$allowed" > "$FLAG.tmp" && chmod 600 "$FLAG.tmp" && mv -f "$FLAG.tmp" "$FLAG"
+printf '%s\n' "$allowed" > "$HINT.tmp" && chmod 644 "$HINT.tmp" && mv -f "$HINT.tmp" "$HINT"
 status "armed for $allowed until $WINDOW s after boot"
 echo "boot-unlock: disk password was typed this boot; the first login by $allowed may skip the account password for $((WINDOW - uptime))s"
 
 # Take the mark away when the window closes, if no one has used it.
 sleep $((WINDOW - uptime))
+rm -f "$HINT"
 rm -f "$FLAG" && echo "boot-unlock: window closed" && status "used or expired"

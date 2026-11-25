@@ -111,7 +111,7 @@ With Omarchy's full-disk encryption you type the disk password at boot and then 
 - only if `/` is on LUKS with no TPM or FIDO2 token and no key file (on the kernel command line, in `/etc/crypttab.initramfs`, in `/etc/cryptsetup-keys.d` or bundled into the initramfs), so a typed passphrase was the only way the disk could have opened;
 - only if SDDM does not log anyone in automatically;
 - only for an account that could also log in with its password (not locked, a real login shell);
-- only for a fresh boot (not a soft-reboot), once, and within 10 minutes of boot;
+- only for a fresh boot (not a soft-reboot), within 10 minutes of boot, and only for the **first** login of the boot: once anyone has signed in, by the login screen or on a console, it is gone;
 - only to **start** an account that is not signed in. Returning to a signed-in (locked) session always takes that account's password.
 
 Every use is logged to the journal (`journalctl -t omarchy-greeter`). This is the same trust Omarchy's own encrypted-disk autologin places in the disk password, narrowed to one login and letting you pick the account. If anything about the disk setup does not match, it stays off and you type your password as usual; `omarchy-greeter status` says why. Turn it off with `omarchy-greeter boot-pass off`.
@@ -121,7 +121,7 @@ It works by adding one line to the top of `/etc/pam.d/sddm` (`pam_exec` of `/usr
 ## How it works
 
 - **The login screen** is an SDDM theme (`theme/`). SDDM runs it as the `sddm` user, who cannot read home folders. So each account publishes its look (a screen-sized still of its background, theme colors, font size, monitor layout, avatar from `~/.face`) to its own private folder, `/var/lib/omarchy-greeter/<account>/`. This happens from a systemd user unit whenever the theme, background, monitors or font change, and at boot for every account (`omarchy-greeter-sync`).
-- **The login screen never reads what an account wrote.** The login screen receives every password, so a root service (`publish-view`) checks each published file (only regular files of a capped size, text matched against what is expected, display sizes parsed and rebuilt), re-encodes images as an unprivileged user, and copies the result into `/var/lib/omarchy-greeter/.view/`, readable only by the login screen. One account cannot freeze, crash or read files through the login screen another account uses.
+- **The login screen only reads checked copies.** The login screen receives every password, so it never opens an account's own files. A root service (`publish-view`) checks each published file (only regular files of a capped size, text matched against what is expected, display sizes parsed and rebuilt), re-encodes images as an unprivileged user, and copies the result into `/var/lib/omarchy-greeter/.view/`, readable only by the login screen. One account cannot freeze, crash or read files through the login screen another account uses. Video backgrounds are the exception, which is why they are off by default: when allowed, a video is repackaged as an unprivileged user, but the login screen still decodes the account's video stream.
 - **The login screen's compositor** uses the same monitor modes as the desktop and stays in SDR, so moving between them causes no monitor blackout.
 - **The lock screen** is Omarchy's own lock plugin, cloned into `~/.config/omarchy/plugins/<account>.lock` and patched (`lib/patch-lock.py`). The clone is rebuilt from Omarchy's current lock before the desktop starts whenever Omarchy's lock or the patch changes, so Omarchy's lock fixes keep arriving. If an Omarchy update ever changes the lock so much that the patch no longer fits, you get Omarchy's own lock and a notification. Nothing breaks.
 - **A session out of sight is always locked.** If another account or the login screen comes to the front while a session is unlocked, that session locks itself (`omarchy-greeter-guard`, which works with either lock screen).
@@ -129,11 +129,13 @@ It works by adding one line to the top of `/etc/pam.d/sddm` (`pam_exec` of `/usr
 
 ## Development
 
-Test the login screen without logging out:
+Test the login screen without logging out. The real looks in `/var/lib/omarchy-greeter/.view` are readable only by `sddm`, so point a copy of the theme at sample looks (a folder per account with `background.jpg`, `colors.toml`, `display.json`):
 
 ```bash
+cp -r /usr/share/sddm/themes/omarchy-greeter /tmp/greeter-test
+sed -i 's|^dataDir=.*|dataDir=/path/to/sample-looks|' /tmp/greeter-test/theme.conf
 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
-  sddm-greeter-qt6 --test-mode --theme /usr/share/sddm/themes/omarchy-greeter
+  sddm-greeter-qt6 --test-mode --theme /tmp/greeter-test
 ```
 
 `make check` runs the syntax checks.

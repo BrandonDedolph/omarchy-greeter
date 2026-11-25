@@ -15,10 +15,6 @@ install -d -m 755 -o root -g root "$ROOT"
 
 read -r uid_min uid_max < <(awk '/^UID_MIN/{a=$2} /^UID_MAX/{b=$2} END{print (a?a:1000), (b?b:60000)}' /etc/login.defs)
 
-# Reads at most a few bytes, and only from a regular file (never a FIFO or a
-# link someone left in their folder).
-small_file() { [[ -f $1 && ! -L $1 ]] && head -c 64 -- "$1" 2>/dev/null < /dev/null; }
-
 accounts=()
 while IFS=: read -r name _ uid gid _ home shell; do
   (( uid >= uid_min && uid <= uid_max )) || continue
@@ -29,12 +25,8 @@ while IFS=: read -r name _ uid gid _ home shell; do
   # Never follow a link someone planted in place of the folder.
   [[ -L $dir ]] && rm -f "$dir"
   install -d -m 700 -o "$uid" -g "$gid" "$dir"
-  # Drop a session marker logind no longer knows (left by a crash or an
-  # earlier boot).
-  if [[ -e $dir/session || -L $dir/session ]]; then
-    sid=$(small_file "$dir/session" | head -n1)
-    [[ $sid =~ ^[0-9a-zA-Z]+$ && -e /run/systemd/sessions/$sid ]] || rm -f "$dir/session"
-  fi
+  # (Nothing in the folder is read here: publish-view opens those files
+  # safely, and drops a stale session marker.)
   accounts+=("$name")
 
   [[ -d $home ]] || continue
@@ -53,8 +45,13 @@ if [[ -d $ROOT/.view && ! -L $ROOT/.view ]]; then
   done
 fi
 
+# Check every look in parallel, waiting at most a minute in all (a slow one
+# keeps its previous view and finishes in the background).
+(( ${#accounts[@]} )) || exit 0
+views=() paths=()
 for name in "${accounts[@]}"; do
-  timeout 120 systemctl start "omarchy-greeter-view@$name.service" ||
-    echo "prepare-dirs: could not check $name's look"
-  systemctl start --no-block "omarchy-greeter-view@$name.path"
+  views+=("omarchy-greeter-view@$name.service")
+  paths+=("omarchy-greeter-view@$name.path")
 done
+systemctl start --no-block "${paths[@]}"
+timeout 60 systemctl start "${views[@]}" || echo "prepare-dirs: some looks are still being checked"

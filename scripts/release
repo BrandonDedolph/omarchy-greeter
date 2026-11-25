@@ -99,13 +99,19 @@ make check
 
 step "Versioning $tag"
 sed -i -E "s/^pkgver=.*/pkgver=$version/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-if [[ -n $(git status --porcelain PKGBUILD) ]]; then
-  git commit -q -m "Release $tag" PKGBUILD
+sed -i -E "s/^Version=.*/Version=$version/" theme/metadata.desktop
+if [[ -n $(git status --porcelain PKGBUILD theme/metadata.desktop) ]]; then
+  git commit -q -m "Release $tag" PKGBUILD theme/metadata.desktop
 fi
 
 # Undo the version commit if anything below fails before publishing.
 release_commit=$(git rev-parse HEAD)
-undo() { [[ $(git rev-parse HEAD) == "$release_commit" && $release_commit != $(git rev-parse origin/main) ]] && git reset -q --hard origin/main; }
+undo() {
+  if [[ $(git rev-parse HEAD) == "$release_commit" && $release_commit != $(git rev-parse origin/main) ]]; then
+    git reset -q --hard origin/main
+  fi
+  return 0
+}
 
 step "Building $version"
 build=$(mktemp -d)

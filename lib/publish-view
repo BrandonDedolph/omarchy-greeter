@@ -39,8 +39,14 @@ import time
 ROOT = "/var/lib/omarchy-greeter"
 VIEW = os.path.join(ROOT, ".view")
 CONF = "/etc/omarchy-greeter.conf"
-NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-MONITOR_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+NAME_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}", re.ASCII)
+MONITOR_RE = re.compile(r"[A-Za-z0-9._-]{1,32}", re.ASCII)
+SESSIONS = "/run/systemd/sessions"
+
+
+def matches(pattern, value):
+    """The whole value, ASCII only (no Unicode digits or letters)."""
+    return value is not None and re.fullmatch(pattern, value, re.ASCII) is not None
 
 KIB, MIB = 1024, 1024 * 1024
 TEXT_LIMITS = {
@@ -55,9 +61,9 @@ TEXT_LIMITS = {
 SANDBOX = ["setpriv", "--reuid=nobody", "--regid=nobody", "--clear-groups",
            "--no-new-privs", "--inh-caps=-all", "--"]
 SANDBOX_ENV = {"PATH": "/usr/bin", "HOME": "/nonexistent", "TMPDIR": "/tmp", "LANG": "C.UTF-8"}
-MAGICK_LIMITS = ["-limit", "memory", "512MiB", "-limit", "map", "1GiB",
-                 "-limit", "width", "16384", "-limit", "height", "16384",
-                 "-limit", "area", "128MP", "-limit", "time", "60"]
+MAGICK_LIMITS = ["-limit", "memory", "512MiB", "-limit", "map", "512MiB",
+                 "-limit", "disk", "256MiB", "-limit", "width", "8192", "-limit", "height", "8192",
+                 "-limit", "area", "64MP", "-limit", "time", "60"]
 
 
 def log(message):
@@ -109,6 +115,13 @@ class Source:
         finally:
             os.close(fd)
 
+    def drop(self, name):
+        """Remove a file from the account's folder (unlink never follows links)."""
+        try:
+            os.unlink(name, dir_fd=self.fd)
+        except OSError:
+            pass
+
     def signature(self):
         """What changed since the last pass (names, sizes, mtimes)."""
         out = []
@@ -146,7 +159,7 @@ def clean_display(raw):
         return None
     out = {}
     family = data.get("fontFamily")
-    if isinstance(family, str) and re.fullmatch(r"[\w .+-]{1,64}", family):
+    if isinstance(family, str) and matches(r"[\w .+-]{1,64}", family):
         out["fontFamily"] = family
     size = number(data.get("fontBaseSize"), 6, 48)
     if size is not None:
@@ -155,7 +168,7 @@ def clean_display(raw):
     raw_monitors = data.get("monitors")
     if isinstance(raw_monitors, dict):
         for name, m in list(raw_monitors.items())[:16]:
-            if not MONITOR_RE.match(str(name)) or not isinstance(m, dict):
+            if not MONITOR_RE.fullmatch(str(name)) or not isinstance(m, dict):
                 continue
             entry = {}
             for key, low, high in (("scale", 0.5, 4), ("width", 640, 15360), ("height", 480, 8640),
@@ -305,21 +318,25 @@ def publish(name, src, view):
     # Small files first: the switch-to request and session marker matter
     # the moment a login screen opens.
     value = text(src.read("switch-to", TEXT_LIMITS["switch-to"]))
-    if value and re.fullmatch(r"\d{1,12} [a-z_][a-z0-9_-]{0,31}\n?", value):
+    if matches(r"[0-9]{1,12} [a-z_][a-z0-9_-]{0,31}\n?", value):
         view.write("switch-to", value)
+    # The session marker, if logind still knows that session (a crash or an
+    # earlier boot leaves a stale one, which is dropped).
     value = text(src.read("session", TEXT_LIMITS["session"]))
-    if value and re.fullmatch(r"[0-9a-zA-Z]{1,32}\n?", value):
+    if matches(r"[0-9a-zA-Z]{1,32}\n?", value) and os.path.exists(os.path.join(SESSIONS, value.strip())):
         view.write("session", value)
+    elif value is not None or os.path.lexists(os.path.join(ROOT, name, "session")):
+        src.drop("session")
     value = text(src.read("updated", TEXT_LIMITS["updated"]))
-    if value and re.fullmatch(r"\d{1,12}\n?", value):
+    if matches(r"[0-9]{1,12}\n?", value):
         view.write("updated", value)
     value = text(src.read("theme.name", TEXT_LIMITS["theme.name"]))
-    if value and re.fullmatch(r"[\w .+-]{1,64}", value.strip()):
+    if value and matches(r"[\w .+-]{1,64}", value.strip()):
         view.write("theme.name", value.strip() + "\n")
     value = text(src.read("colors.toml", TEXT_LIMITS["colors.toml"]))
     if value is not None:
         # Only the `key = "#rrggbb"` lines the login screen reads.
-        lines = re.findall(r'(?m)^\s*([a-z_]{1,32})\s*=\s*"(#[0-9a-fA-F]{6})"', value)
+        lines = re.findall(r'(?m)^[ \t]*([a-z_]{1,32})[ \t]*=[ \t]*"(#[0-9a-fA-F]{6})"', value, re.ASCII)
         view.write("colors.toml", "".join(f'{k} = "{v}"\n' for k, v in lines[:64]))
     display = clean_display(text(src.read("display.json", TEXT_LIMITS["display.json"])))
     if display is not None:
@@ -330,7 +347,7 @@ def publish(name, src, view):
     media(view, src, "avatar.png", 8 * MIB, reencode_png)
 
     video = (text(src.read("video", TEXT_LIMITS["video"])) or "").strip()
-    m = re.fullmatch(r"background\.(mp4|webm|mkv|mov|m4v)", video)
+    m = re.fullmatch(r"background\.(mp4|webm|mkv|mov|m4v)", video, re.ASCII)
     if m and conf_value("video") == "yes":
         if media(view, src, video, 150 * MIB, lambda data: remux_video(data, m.group(1)), "background.mkv"):
             view.write("video", "background.mkv\n")
@@ -341,7 +358,7 @@ def main():
         print("usage: publish-view <account>  (as root)", file=sys.stderr)
         return 2
     name = sys.argv[1]
-    if not NAME_RE.match(name):
+    if not NAME_RE.fullmatch(name):
         log(f"not an account name: {name!r}")
         return 1
     try:

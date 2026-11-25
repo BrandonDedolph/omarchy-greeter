@@ -1,5 +1,6 @@
-# Development build from this working tree: makepkg -si
-# Releases are built from aur/PKGBUILD (a tagged GitHub release).
+# Builds from this working tree: makepkg -si. scripts/release builds releases
+# with it from a clean export of the tagged code (and writes aur/PKGBUILD,
+# from a release tarball, for the AUR).
 pkgname=omarchy-greeter
 pkgver=3.0.0
 pkgrel=1

@@ -2,17 +2,24 @@ PAM_FILE=/etc/pam.d/sddm
 PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
 USER_UNITS='omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service'
 
+SESSION_LINE='session     optional    pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
+
+# Two lines in /etc/pam.d/sddm: one before the first auth line, so it is
+# checked first and falls through to the normal password check whenever it
+# does not apply; one at the end of the session stack, so the first login of
+# the boot (whoever it is) uses the boot pass up. Built next to the file and
+# renamed over it, so it is never half-written.
 add_pam_line() {
   [[ -f $PAM_FILE ]] || return 0
-  grep -qF 'boot-unlock-auth' "$PAM_FILE" && return 0
-  # Before the first auth line, so it is checked first and falls through to
-  # the normal password check whenever it does not apply. Built outside
-  # /etc/pam.d and swapped in whole.
   local tmp
-  tmp=$(mktemp) || return 0
-  if awk -v line="$PAM_LINE" '!done && /^[[:space:]]*-?auth[[:space:]]/ { print line; done=1 } { print }' "$PAM_FILE" > "$tmp" &&
-    grep -qF 'boot-unlock-auth' "$tmp"; then
-    install -m 644 -o root -g root "$tmp" "$PAM_FILE"
+  tmp=$(mktemp "$PAM_FILE.omarchy-greeter.XXXXXX") || return 0
+  awk -v auth="$PAM_LINE" -v session="$SESSION_LINE" '
+    /boot-unlock-auth/ { next }
+    !done && /^[[:space:]]*-?auth[[:space:]]/ { print auth; done=1 }
+    { print }
+    END { print session }' "$PAM_FILE" > "$tmp"
+  if grep -qxF "$PAM_LINE" "$tmp" && grep -qxF "$SESSION_LINE" "$tmp"; then
+    cmp -s "$tmp" "$PAM_FILE" || { chmod 644 "$tmp" && chown root:root "$tmp" && mv -f "$tmp" "$PAM_FILE"; }
   fi
   rm -f "$tmp"
 }
