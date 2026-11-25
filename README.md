@@ -29,7 +29,7 @@ From the latest [release](https://github.com/BrandonDedolph/omarchy-greeter/rele
 curl -fsSL https://github.com/BrandonDedolph/omarchy-greeter/releases/latest/download/install.sh | bash
 ```
 
-It downloads the package, checks its signature against the project's release key, and installs it with `pacman` (it asks for your password). Nothing is installed if the signature does not match. You can read [the script](scripts/install.sh) first, or build from source instead: `git clone https://github.com/BrandonDedolph/omarchy-greeter.git && cd omarchy-greeter && makepkg -si`.
+It downloads the package, checks its signature against the project's release key, and installs it with `pacman` (it asks for your password). Nothing is installed if the signature does not match. The release key's fingerprint is `SHA256:FUHW/eAyg1oZyYLBpEp072NR5u15Z3heo2QpCmxi2fY`; to check it yourself, see [SECURITY.md](SECURITY.md#release-signing). You can read [the script](scripts/install.sh) first, or build from source instead: `git clone https://github.com/BrandonDedolph/omarchy-greeter.git && cd omarchy-greeter && makepkg -si`.
 
 (An AUR package will follow once AUR account registration reopens.)
 
@@ -138,11 +138,15 @@ QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
   sddm-greeter-qt6 --test-mode --theme /tmp/greeter-test
 ```
 
-`make check` runs the syntax checks.
+`make check` runs the static checks (bash syntax, shellcheck, QML and Lua syntax) and `make test` the tests, which run in temporary folders with stand-ins for root and Omarchy, so they never touch the real system. Both run on every push, and weekly against Omarchy's latest lock screen, so an Omarchy change that breaks the patch shows up before users hit it. Set `OMARCHY_LOCK_SOURCES=/path/to/omarchy/shell/plugins/lock` to also test the patch against another copy of the lock.
 
 To release a version (maintainers): `scripts/release 1.1.0`. It checks the tree, builds the package from a clean export, signs it with the release key (an SSH key, `keys/allowed_signers`), tags `v1.1.0` and creates the GitHub release with the package, its signature and `install.sh`. Installed copies pick it up at their next `omarchy update`.
 
 For screenshots without real account names, add `demoUsers=alex:Alex Rivera,sam:Sam Chen` (and optionally `demoHost=`) to a copy of `theme.conf`, with `dataDir=` pointing at sample looks.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Please do not open a public issue for it.
 
 ## License
 
