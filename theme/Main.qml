@@ -370,15 +370,11 @@ Rectangle {
     }
   }
 
-  // Legibility: darken toward the middle band and the bottom edge, in the
-  // theme's own background color rather than flat black.
+  // Flat, not a gradient: a soft gradient over a whole 4K screen steps
+  // through only a few dozen color levels and shows as horizontal bands.
   Rectangle {
     anchors.fill: parent
-    gradient: Gradient {
-      GradientStop { position: 0.0; color: root.alpha(root.cBackground, 0.10) }
-      GradientStop { position: 0.45; color: root.alpha(root.cBackground, 0.30) }
-      GradientStop { position: 1.0; color: root.alpha(root.cBackground, 0.65) }
-    }
+    color: root.alpha(root.cBackground, 0.30)
   }
 
   // ---- clock -------------------------------------------------------------
