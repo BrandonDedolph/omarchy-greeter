@@ -1,0 +1,20 @@
+[Unit]
+Description=Tell the login screen who is signed in
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/omarchy-greeter/publish-view --sessions
+TimeoutStartSec=60
+ProtectSystem=strict
+ReadWritePaths=/var/lib/omarchy-greeter
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+MemoryMax=256M

@@ -2,6 +2,7 @@
 """Copy one account's published look into what the login screen reads.
 
     publish-view <account>     (as root; from omarchy-greeter-view@.service)
+    publish-view --sessions    (as root; who is signed in, for every account)
 
 Each account writes its look into /var/lib/omarchy-greeter/<account>/, a
 folder it owns. The login screen runs as `sddm` and receives every
@@ -41,7 +42,7 @@ VIEW = os.path.join(ROOT, ".view")
 CONF = "/etc/omarchy-greeter.conf"
 NAME_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}", re.ASCII)
 MONITOR_RE = re.compile(r"[A-Za-z0-9._-]{1,32}", re.ASCII)
-SESSIONS = "/run/systemd/sessions"
+LOGINCTL = "loginctl"
 
 
 def matches(pattern, value):
@@ -314,19 +315,74 @@ def media(view, src, name, limit, convert, out_name=None):
     return True
 
 
+def signed_in():
+    """Accounts with a desktop session running, from logind: {name: session id}.
+
+    Asked of logind itself (not a marker the account writes), so it is right
+    after a crash, a reinstall or anything else, and no account can fake it.
+    A session counts if it is graphical (wayland/x11), a user session, and
+    not on its way out.
+    """
+    try:
+        listed = json.loads(subprocess.run([LOGINCTL, "list-sessions", "--json=short"], capture_output=True,
+                                           text=True, timeout=10, check=True).stdout or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+    found = {}
+    for entry in listed:
+        sid, user = str(entry.get("session", "")), str(entry.get("user", ""))
+        if entry.get("class") != "user" or not matches(r"[0-9a-zA-Z]{1,32}", sid) or not NAME_RE.fullmatch(user):
+            continue
+        try:
+            props = subprocess.run([LOGINCTL, "show-session", sid, "-p", "Type", "-p", "State", "-p", "Class"],
+                                   capture_output=True, text=True, timeout=10, check=True).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        values = dict(line.split("=", 1) for line in props.splitlines() if "=" in line)
+        if values.get("Class") == "user" and values.get("Type") in ("wayland", "x11") and values.get("State") != "closing":
+            found.setdefault(user, sid)
+    return found
+
+
+def write_session(view, name, sessions):
+    if name in sessions:
+        view.write("session", sessions[name] + "\n")
+
+
+def update_sessions():
+    """Refresh only the signed-in state of every account's view."""
+    sessions = signed_in()
+    if not os.path.isdir(VIEW) or os.path.islink(VIEW):
+        return 0
+    try:
+        sddm_gid = grp.getgrnam("sddm").gr_gid
+    except KeyError:
+        return 1
+    for name in sorted(os.listdir(VIEW)):
+        if not NAME_RE.fullmatch(name):
+            continue
+        try:
+            pwd.getpwnam(name)
+        except KeyError:
+            continue
+        view = View(name, sddm_gid)
+        if name in sessions:
+            view.write("session", sessions[name] + "\n")
+        else:
+            try:
+                os.unlink(view.path("session"))
+            except FileNotFoundError:
+                pass
+    return 0
+
+
 def publish(name, src, view):
     # Small files first: the switch-to request and session marker matter
     # the moment a login screen opens.
     value = text(src.read("switch-to", TEXT_LIMITS["switch-to"]))
     if matches(r"[0-9]{1,12} [a-z_][a-z0-9_-]{0,31}\n?", value):
         view.write("switch-to", value)
-    # The session marker, if logind still knows that session (a crash or an
-    # earlier boot leaves a stale one, which is dropped).
-    value = text(src.read("session", TEXT_LIMITS["session"]))
-    if matches(r"[0-9a-zA-Z]{1,32}\n?", value) and os.path.exists(os.path.join(SESSIONS, value.strip())):
-        view.write("session", value)
-    elif value is not None or os.path.lexists(os.path.join(ROOT, name, "session")):
-        src.drop("session")
+    write_session(view, name, signed_in())
     value = text(src.read("updated", TEXT_LIMITS["updated"]))
     if matches(r"[0-9]{1,12}\n?", value):
         view.write("updated", value)
@@ -355,8 +411,10 @@ def publish(name, src, view):
 
 def main():
     if os.geteuid() != 0 or len(sys.argv) != 2:
-        print("usage: publish-view <account>  (as root)", file=sys.stderr)
+        print("usage: publish-view <account> | --sessions  (as root)", file=sys.stderr)
         return 2
+    if sys.argv[1] == "--sessions":
+        return update_sessions()
     name = sys.argv[1]
     if not NAME_RE.fullmatch(name):
         log(f"not an account name: {name!r}")

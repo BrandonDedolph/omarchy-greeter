@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch who is signed in, for the login screen
+
+[Path]
+# logind rewrites a file here whenever a session starts, ends or changes.
+PathChanged=/run/systemd/sessions
+Unit=omarchy-greeter-sessions.service
+
+[Install]
+WantedBy=multi-user.target

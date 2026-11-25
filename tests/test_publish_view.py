@@ -36,13 +36,21 @@ class PublishView(unittest.TestCase):
         self.root = self.tmp / "root"
         self.src_dir = self.root / "alex"
         self.src_dir.mkdir(parents=True)
-        self.sessions = self.tmp / "sessions"
-        self.sessions.mkdir()
+        # A stand-in loginctl: sessions are listed in self.tmp/sessions.json,
+        # their properties in self.tmp/props-<id>.
+        self.loginctl = self.tmp / "loginctl"
+        self.loginctl.write_text(
+            "#!/bin/sh\n"
+            f"cd '{self.tmp}' || exit 1\n"
+            'if [ "$1" = list-sessions ]; then cat sessions.json 2>/dev/null || echo "[]"; exit 0; fi\n'
+            'if [ "$1" = show-session ]; then cat "props-$2" 2>/dev/null; exit 0; fi\n'
+            "exit 1\n")
+        self.loginctl.chmod(0o755)
         self.conf = self.tmp / "omarchy-greeter.conf"
         self.conf.write_text("video=no\n")
         self.pv.ROOT = str(self.root)
         self.pv.VIEW = str(self.root / ".view")
-        self.pv.SESSIONS = str(self.sessions)
+        self.pv.LOGINCTL = str(self.loginctl)
         self.pv.CONF = str(self.conf)
         self.pv.SANDBOX = []
         self._chown = os.chown
@@ -110,15 +118,42 @@ class PublishView(unittest.TestCase):
         self.assertEqual((view / "monitors").read_text(),
                          "DP-1 3840x2160@143.99 0x0 1.5 1\neDP-1 1920x1080@60 0x0 1 0\n")
 
-    def test_session_marker_needs_a_live_session(self):
+    def sessions(self, *entries):
+        listed = []
+        for sid, user, cls, kind, state in entries:
+            listed.append({"session": sid, "user": user, "class": cls})
+            (self.tmp / f"props-{sid}").write_text(f"Type={kind}\nState={state}\nClass={cls}\n")
+        (self.tmp / "sessions.json").write_text(json.dumps(listed))
+
+    def test_signed_in_comes_from_logind(self):
+        # A marker the account writes itself is ignored.
         self.write("session", "7\n")
         view = self.publish()
         self.assertFalse((view / "session").exists())
-        self.assertFalse((self.src_dir / "session").exists(), "stale marker is dropped")
-        (self.sessions / "8").write_text("STATE=active\n")
-        self.write("session", "8\n")
+        # The manager, a text console and a closing session do not count.
+        self.sessions(("1", "alex", "manager", "unspecified", "active"),
+                      ("2", "alex", "user", "tty", "active"),
+                      ("3", "alex", "user", "wayland", "closing"))
         view = self.publish()
-        self.assertEqual((view / "session").read_text(), "8\n")
+        self.assertFalse((view / "session").exists())
+        self.sessions(("4", "alex", "user", "wayland", "online"))
+        view = self.publish()
+        self.assertEqual((view / "session").read_text(), "4\n")
+
+    def test_sessions_refresh_every_account(self):
+        self.write("theme.name", "Tokyo Night\n")
+        self.sessions(("4", "alex", "user", "wayland", "active"))
+        view = self.publish()
+        self.assertTrue((view / "session").exists())
+        self.pv.pwd.getpwnam = lambda name: None
+        self.pv.grp.getgrnam = lambda name: type("g", (), {"gr_gid": os.getgid()})
+        self.sessions()
+        self.assertEqual(self.pv.update_sessions(), 0)
+        self.assertFalse((view / "session").exists(), "signed out: marker removed")
+        self.assertTrue((view / "theme.name").exists(), "the rest of the view is untouched")
+        self.sessions(("5", "alex", "user", "x11", "active"))
+        self.pv.update_sessions()
+        self.assertEqual((view / "session").read_text(), "5\n")
 
     # ---- file types ------------------------------------------------------
 

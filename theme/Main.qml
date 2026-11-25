@@ -135,16 +135,11 @@ Rectangle {
     }
   }
 
-  // Has this account a session running (Locked) or not (Log in)?
+  // Has this account a session running (Locked) or not (Log in)? A root
+  // service asks logind and keeps this file current (publish-view --sessions).
   function readSession(name) {
     readText(dataDir + "/" + name + "/session", function(id) {
-      id = id.trim()
-      if (!/^[0-9a-zA-Z]+$/.test(id)) { setLook(name, "running", false); return }
-      // The session must still be known to logind and not on its way out.
-      readText("/run/systemd/sessions/" + id, function(text) {
-        var state = (text.match(/^STATE=(\w+)/m) || [])[1] || ""
-        setLook(name, "running", text.length > 0 && state !== "closing")
-      })
+      setLook(name, "running", /^[0-9a-zA-Z]+$/.test(id.trim()))
     })
   }
   Timer {

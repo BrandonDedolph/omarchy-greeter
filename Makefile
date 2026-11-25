@@ -7,8 +7,6 @@ DESTDIR ?=
 install:
 	install -Dm755 bin/omarchy-greeter-sync "$(DESTDIR)/usr/bin/omarchy-greeter-sync"
 	install -Dm755 bin/omarchy-greeter-lock-setup "$(DESTDIR)/usr/bin/omarchy-greeter-lock-setup"
-	install -Dm755 bin/omarchy-greeter-presence "$(DESTDIR)/usr/bin/omarchy-greeter-presence"
-	install -Dm644 systemd/user/omarchy-greeter-presence.service "$(DESTDIR)/usr/lib/systemd/user/omarchy-greeter-presence.service"
 	install -Dm755 bin/omarchy-greeter-guard "$(DESTDIR)/usr/bin/omarchy-greeter-guard"
 	install -Dm755 bin/omarchy-greeter "$(DESTDIR)/usr/bin/omarchy-greeter"
 	install -Dm644 systemd/user/omarchy-greeter-guard.service "$(DESTDIR)/usr/lib/systemd/user/omarchy-greeter-guard.service"
@@ -21,6 +19,8 @@ install:
 	install -Dm755 lib/publish-view "$(DESTDIR)/usr/lib/omarchy-greeter/publish-view"
 	install -Dm644 systemd/system/omarchy-greeter-view@.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.service"
 	install -Dm644 systemd/system/omarchy-greeter-view@.path "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.path"
+	install -Dm644 systemd/system/omarchy-greeter-sessions.path "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-sessions.path"
+	install -Dm644 systemd/system/omarchy-greeter-sessions.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-sessions.service"
 	install -Dm755 lib/boot-unlock-mark "$(DESTDIR)/usr/lib/omarchy-greeter/boot-unlock-mark"
 	install -Dm755 lib/boot-unlock-auth "$(DESTDIR)/usr/lib/omarchy-greeter/boot-unlock-auth"
 	install -Dm644 systemd/system/omarchy-greeter-boot-unlock.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-boot-unlock.service"

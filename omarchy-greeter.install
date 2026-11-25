@@ -1,6 +1,7 @@
 PAM_FILE=/etc/pam.d/sddm
 PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
-USER_UNITS=(omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service)
+USER_UNITS=(omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service)
+SYSTEM_UNITS=(omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service omarchy-greeter-sessions.path)
 
 SESSION_LINE='session     optional    pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
 
@@ -40,9 +41,10 @@ for_each_account() {
 
 post_install() {
   systemctl daemon-reload
-  systemctl enable omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service
+  systemctl enable "${SYSTEM_UNITS[@]}"
   systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
+  systemctl start omarchy-greeter-sessions.path || true
   # Publish and check every account's look now, not just at next boot.
   systemctl start omarchy-greeter-dirs.service || true
   # The menu entries and update hook are plain files: add them now, as each
@@ -53,7 +55,12 @@ post_install() {
 }
 
 post_upgrade() {
+  # Before 1.0.2 each session announced itself (omarchy-greeter-presence);
+  # now a root service asks logind.
+  rm -f /etc/systemd/user/graphical-session.target.wants/omarchy-greeter-presence.service
   systemctl daemon-reload
+  systemctl enable omarchy-greeter-sessions.path
+  systemctl start omarchy-greeter-sessions.path || true
   systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
   systemctl restart omarchy-greeter-dirs.service || true
@@ -76,7 +83,7 @@ pre_remove() {
   mapfile -t units < <(systemctl list-units --plain --no-legend --all 'omarchy-greeter-view@*' 2>/dev/null | awk '{print $1}')
   (( ${#units[@]} )) && systemctl stop "${units[@]}" 2>/dev/null
   true
-  systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
+  systemctl disable --now "${SYSTEM_UNITS[@]}" omarchy-greeter-sessions.service || true
   systemctl --global disable "${USER_UNITS[@]}" || true
   rm -f /run/omarchy-greeter/boot-unlocked
 }
