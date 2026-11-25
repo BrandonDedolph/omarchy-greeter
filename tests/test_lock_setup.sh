@@ -18,7 +18,7 @@ printf '#!/bin/bash\nexit 1\n' > "$fake/omarchy-shell"        # no shell running
 printf '#!/bin/bash\necho "$*" >> %q\n' "$notes" > "$fake/notify-send"
 chmod +x "$fake"/*
 setup() { env HOME="$home" USER=$me PATH="$fake:$PATH" "$@" "$REPO/bin/omarchy-greeter-lock-setup" "${args[@]}"; }
-run() { args=("$@"); setup env OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
+run() { args=("$@"); setup env OMARCHY_GREETER_LOCK_UI="$REPO/lock:$REPO/theme" OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
 clone=$home/.config/omarchy/plugins/$me.lock
 
 check "first setup" run --ensure
@@ -31,7 +31,7 @@ equal "nothing rebuilt when up to date" "$before" "$(stat -c %Y "$clone/Service.
 # A patch that no longer fits: back to the built-in lock, said once.
 printf 'import sys\nsys.exit("does not fit")\n' > "$TMP/bad-patch.py"
 echo "x y" > "$clone/.omarchy-greeter-stamp"   # pretend the stock lock changed
-bad() { args=("$@"); setup env OMARCHY_GREETER_PATCH="$TMP/bad-patch.py"; }
+bad() { args=("$@"); setup env OMARCHY_GREETER_LOCK_UI="$REPO/lock:$REPO/theme" OMARCHY_GREETER_PATCH="$TMP/bad-patch.py"; }
 check_not "failing patch reports failure" bad --at-login
 check_not "clone removed without a shell" test -d "$clone"
 check "failure remembered" test -s "$home/.config/omarchy-greeter/lock-failed"
@@ -59,7 +59,7 @@ case "\$*" in
 esac
 SH
 chmod +x "$fake/omarchy-shell"
-verify() { args=(--verify); setup env VERIFY_INTERVAL=0 OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
+verify() { args=(--verify); setup env VERIFY_INTERVAL=0 OMARCHY_GREETER_LOCK_UI="$REPO/lock:$REPO/theme" OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
 check "verify: no shell yet, nothing judged" verify
 check "verify: clone kept without a shell" test -d "$clone"
 touch "$TMP/shell-up" "$TMP/clone-loads"

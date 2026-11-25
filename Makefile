@@ -16,6 +16,10 @@ install:
 	install -Dm755 bin/omarchy-greeter-switch "$(DESTDIR)/usr/bin/omarchy-greeter-switch"
 	install -Dm755 bin/omarchy-greeter-session-watch "$(DESTDIR)/usr/bin/omarchy-greeter-session-watch"
 	install -Dm644 lib/patch-lock.py "$(DESTDIR)/usr/lib/omarchy-greeter/patch-lock.py"
+	install -Dm644 lock/GreeterLockView.qml "$(DESTDIR)/usr/lib/omarchy-greeter/lock-ui/GreeterLockView.qml"
+	for f in AccountForm AccountList PasswordBox FocusRing FormStyle UserAvatar; do \
+		install -Dm644 "theme/$$f.qml" "$(DESTDIR)/usr/lib/omarchy-greeter/lock-ui/$$f.qml"; \
+	done
 	install -Dm755 lib/prepare-dirs "$(DESTDIR)/usr/lib/omarchy-greeter/prepare-dirs"
 	install -Dm755 lib/publish-view "$(DESTDIR)/usr/lib/omarchy-greeter/publish-view"
 	install -Dm644 systemd/system/omarchy-greeter-view@.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.service"
@@ -47,7 +51,7 @@ check:
 	shellcheck -s bash $(SHELL_SCRIPTS)
 	python3 -c 'import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' lib/patch-lock.py lib/publish-view
 	luac -p share/hyprland.lua
-	! /usr/lib/qt6/bin/qmllint theme/*.qml 2>&1 | grep -E '\[syntax\]'
+	! /usr/lib/qt6/bin/qmllint theme/*.qml lock/*.qml 2>&1 | grep -E '\[syntax\]'
 
 # Behaviour tests, in temporary folders (never the real system).
 # OMARCHY_LOCK_SOURCES: extra copies of Omarchy's lock plugin to patch.

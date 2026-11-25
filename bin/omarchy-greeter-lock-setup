@@ -33,15 +33,24 @@ OPTOUT="$HOME/.config/omarchy-greeter/no-primary-lock"
 # Installed by older versions; the update hook now belongs to `omarchy-greeter hook`.
 OLD_HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"
 PATCH="${OMARCHY_GREETER_PATCH:-/usr/lib/omarchy-greeter/patch-lock.py}"
+# Our lock layout and the form it shares with the login screen
+# (colon-separated folders; the first that has a file wins).
+LOCK_UI="${OMARCHY_GREETER_LOCK_UI:-/usr/lib/omarchy-greeter/lock-ui}"
+IFS=: read -r -a ui_dirs <<< "$LOCK_UI"
 STAMP="$DIR/.omarchy-greeter-stamp"
 # The stamp of a build that failed, so it is not retried (and announced)
 # on every sync until the patch or Omarchy's lock changes.
 FAILED="$HOME/.config/omarchy-greeter/lock-failed"
 
-# What the clone was built from: "<patch hash> <stock lock hash>". When
-# either changes (package or Omarchy update), the clone is rebuilt.
+# What the clone was built from: "<our hash> <stock lock hash>", ours
+# covering the patch and our layout. When either changes (package or Omarchy
+# update), the clone is rebuilt.
+ours_hash() {
+  local dir
+  { cat "$PATCH"; for dir in "${ui_dirs[@]}"; do cat "$dir"/*.qml; done; } 2>/dev/null | sha256sum | cut -d' ' -f1
+}
 stamp() {
-  printf '%s %s\n' "$(sha256sum < "$PATCH" | cut -d' ' -f1)" \
+  printf '%s %s\n' "$(ours_hash)" \
     "$(cat /usr/share/omarchy/shell/plugins/lock/*.qml 2>/dev/null | sha256sum | cut -d' ' -f1)"
 }
 
@@ -184,13 +193,13 @@ give_up() {
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cp -r /usr/share/omarchy/shell/plugins/lock/. "$work/"
-python3 -I "$PATCH" "$work" "$MARK" ||
+python3 -I "$PATCH" "$work" "$MARK" "${ui_dirs[@]}" ||
   give_up "the built-in lock changed and the patch no longer fits" \
     "Omarchy's lock changed and the multi-user lock could not be applied; using the built-in lock (form on every monitor). Backgrounded sessions still lock."
 # A lock that fails to parse means no lock at all, so check before using it.
 # (qmllint exits non-zero on any warning, so read its output, not its status.)
 lint=""
-[[ -x /usr/lib/qt6/bin/qmllint ]] && lint=$(/usr/lib/qt6/bin/qmllint "$work/Service.qml" "$work/LockView.qml" 2>&1 || true)
+[[ -x /usr/lib/qt6/bin/qmllint ]] && lint=$(/usr/lib/qt6/bin/qmllint "$work"/*.qml 2>&1 || true)
 if grep -qE '\[syntax\]' <<<"$lint"; then
   give_up "the patched lock does not parse" "The multi-user lock did not build; using the built-in lock."
 fi

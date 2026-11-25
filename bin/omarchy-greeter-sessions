@@ -1,6 +1,7 @@
 #!/bin/bash
-# For the lock screen: who I am, and which other accounts are signed in on
-# this machine right now (one entry per account, graphical sessions only).
+# For the lock screen: who I am, which other accounts are signed in on this
+# machine right now (graphical sessions only), and every account the login
+# screen lists (for the account list), each marked signed in or not.
 set -euo pipefail
 
 # Demo data for screenshots ($XDG_RUNTIME_DIR is private to this account and
@@ -26,10 +27,17 @@ for sid in $(loginctl list-sessions --json=short 2>/dev/null |
 done
 others=$(printf '%s' "$others" | sort -u)
 
+# Accounts the login screen offers: regular uids with a login shell.
+accounts=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ { split($5, gecos, ","); print $1 "\t" gecos[1] }')
+
 {
   printf '%s\t%s\n' "$me" "$(real_name "$me")"
   for user in $others; do printf '%s\t%s\n' "$user" "$(real_name "$user")"; done
 } | jq -R -s -c '
   split("\n") | map(select(length > 0) | split("\t") | {name: .[0], realName: (.[1] // "")})
   | {me: .[0], others: .[1:]}' |
-  jq -c --arg avatar "$avatar" '.me.avatar = $avatar'
+  jq -c --arg avatar "$avatar" --arg accounts "$accounts" --arg others "$others" '
+    .me.avatar = $avatar
+    | ($others | split("\n") | map(select(length > 0))) as $on
+    | .accounts = ($accounts | split("\n") | map(split("\t") | select(.[0] | test("^[a-z_][a-z0-9_-]{0,31}$")))
+        | map({name: .[0], realName: (.[1] // ""), signedIn: (.[0] as $n | $on | index($n) != null)}))'

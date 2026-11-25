@@ -1,23 +1,35 @@
 """Patch a fresh clone of Omarchy's lock plugin (omarchy.lock).
 
-Adds, on top of the built-in lock:
+Omarchy's lock logic (Service.qml) gets small additions, by exact-text
+anchors:
   - the form shows only on the primary monitor (/etc/omarchy-greeter.conf),
     other monitors black but still passing typing through;
-  - who is signed in (avatar, name) and which other accounts are signed in;
-  - "Switch user": opens the login screen while this session stays locked;
+  - who is signed in, and every account (for the account list);
+  - switching user: opens the login screen while this session stays locked;
   - unlocks when logind says so (SDDM does when you log back into this
-    session from the login screen), so switching back takes one password.
+    session from the login screen), so switching back takes one password;
+  - a session out of sight never unlocks, blanks or holds the reader.
+
+The layout is not patched: it is replaced. Omarchy's LockView.qml is kept,
+untouched, as StockLockView.qml; our layout (GreeterLockView.qml and the
+form it shares with the login screen) is copied in; and a generated
+LockView.qml declares every property and signal Omarchy's layout declares
+(so whatever the lock logic passes in, it loads), loads ours, and falls back
+to StockLockView.qml if ours does not load.
 
 Every anchor must match exactly once, or nothing is written and the caller
 falls back to the built-in lock.
 
-usage: patch-lock.py <clone-dir> <marker>
+usage: patch-lock.py <clone-dir> <marker> <ui-dir>...
+  ui-dir: folders holding GreeterLockView.qml and the shared form files
 """
+import re
 import sys
 from pathlib import Path
 
-clone, mark = Path(sys.argv[1]), sys.argv[2]
+clone, mark, ui_dirs = Path(sys.argv[1]), sys.argv[2], [Path(d) for d in sys.argv[3:]]
 files = {name: (clone / name).read_text() for name in ("Service.qml", "LockView.qml")}
+stock_view = files["LockView.qml"]
 
 
 def rep(name, old, new):
@@ -97,6 +109,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // Who is signed in here, and who else is signed in on this machine.
   property var currentUserInfo: ({ name: root.userName, realName: "" })
   property var otherUsers: []
+  property var accounts: []
   property string avatarPath: ""
 
   Process {
@@ -109,6 +122,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
           if (info.me) root.currentUserInfo = info.me
           root.avatarPath = info.me && info.me.avatar ? info.me.avatar : ""
           root.otherUsers = info.others || []
+          root.accounts = info.accounts || []
         } catch (e) {}
       }
     }
@@ -277,6 +291,7 @@ rep("Service.qml", '''      color: Commons.Color.background
         extrasEnabled: root.isPrimaryOutput(lockSurface.screen)
         currentUser: root.currentUserInfo
         otherUsers: root.otherUsers
+        accounts: root.accounts
         avatarPath: root.avatarPath
         onSwitchUserRequested: function(name) { root.switchUser(name) }
 ''')
@@ -289,225 +304,109 @@ rep("Service.qml", '''      inputEnabled: false
 ''', '''      inputEnabled: false
       currentUser: root.currentUserInfo
       otherUsers: root.otherUsers
+      accounts: root.accounts
       avatarPath: root.avatarPath
 ''')
 
-# --------------------------------------------------------------- LockView.qml
+# ------------------------------------------------------------------ the layout
 
-rep("LockView.qml", '''  signal wakeRequested()
-''', '''  signal wakeRequested()
+UI_FILES = ["GreeterLockView.qml", "AccountForm.qml", "AccountList.qml", "PasswordBox.qml",
+            "FocusRing.qml", "FormStyle.qml", "UserAvatar.qml"]
 
-  // ''' + mark + ''': who is signed in, and switching accounts.
-  property var currentUser: ({ name: "", realName: "" })
-  property var otherUsers: []
-  property string avatarPath: ""
-  signal switchUserRequested(string name)
-  // Off on black monitors, where the form is invisible but typing still
-  // reaches the password field: the hidden buttons must not be clickable.
-  property bool extrasEnabled: true
+ui = {}
+for name in UI_FILES:
+    for folder in ui_dirs:
+        if (folder / name).is_file():
+            ui[name] = (folder / name).read_text()
+            break
+    else:
+        raise SystemExit(f"missing {name} (looked in {', '.join(map(str, ui_dirs)) or 'no folders'})")
 
-  readonly property string displayName: currentUser && (currentUser.realName || currentUser.name) ? (currentUser.realName || currentUser.name) : ""
+# What Omarchy's layout takes: its top-level properties (not readonly) and
+# signals. A default is kept only when it is a plain literal.
+LITERAL = re.compile(r'"[^"\\]*"|-?\d+(\.\d+)?|true|false|\[\]|\(\{\}\)')
+props, signals = [], []
+for line in stock_view.splitlines():
+    m = re.fullmatch(r"  property ([\w.<>]+) (\w+)(?:\s*:\s*(.*?))?\s*", line)
+    if m:
+        kind, name, default = m.groups()
+        props.append((kind, name, default if default and LITERAL.fullmatch(default) else None))
+        continue
+    m = re.fullmatch(r"  signal (\w+)(\([^)]*\))?\s*", line)
+    if m:
+        signals.append((m.group(1), m.group(2) or "()"))
+if not any(n == "passwordText" for _, n, _ in props) or not any(n == "submitPassword" for n, _ in signals):
+    raise SystemExit("LockView.qml: its interface no longer looks like a lock layout")
 
-  function initials(text) {
-    var parts = String(text || "?").replace(/[._-]+/g, " ").trim().split(/\\s+/)
-    return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : "")).toUpperCase()
-  }
-''')
+OURS_PROPS = [("var", "currentUser", "({})"), ("var", "otherUsers", "[]"), ("var", "accounts", "[]"),
+              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true")]
+OURS_SIGNALS = [("switchUserRequested", "(string name)")]
+known = {n for _, n, _ in props}
+props += [p for p in OURS_PROPS if p[1] not in known]
+known_signals = {n for n, _ in signals}
+signals += [s for s in OURS_SIGNALS if s[0] not in known_signals]
 
-# Tab moves between the password field and the switch buttons; Enter or
-# Space on a button presses it, and typing goes back to the password.
-rep("LockView.qml", '''        activeFocusOnPress: true
-''', '''        activeFocusOnPress: true
-        activeFocusOnTab: true
-''')
-rep("LockView.qml", '''    if (inputEnabled && passwordInput.enabled && !passwordInput.activeFocus) forcePasswordFocus()
-''', '''    if (inputEnabled && passwordInput.enabled && !passwordInput.activeFocus && !switchFocused()) forcePasswordFocus()
-''')
-rep("LockView.qml", '''  function forcePasswordFocus() {
-''', '''  // A switch button has keyboard focus (Tab), so the field must not take it back.
-  function switchFocused() {
-    var item = Window.activeFocusItem
-    return !!item && item.objectName === "omarchyGreeterSwitch" && item.visible && item.enabled
-  }
+decl = "\n".join(f"  property {k} {n}" + (f": {d}" if d else "") for k, n, d in props)
+sigs = "\n".join(f"  signal {n}{a}" for n, a in signals)
+names = ", ".join(f'"{n}"' for _, n, _ in props)
+signal_names = ", ".join(f'"{n}"' for n, _ in signals)
 
-  function switchKey(event, press) {
-    root.wakeRequested()
-    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-      if (!event.isAutoRepeat) press()
-      event.accepted = true
-    } else if (event.key === Qt.Key_Escape) {
-      root.forcePasswordFocus()
-      event.accepted = true
-    } else if (event.text.length === 1 && event.text.charCodeAt(0) >= 32 && !(event.modifiers & Qt.ControlModifier)) {
-      root.forcePasswordFocus()
-      root.passwordTextEdited(root.passwordText + event.text)
-      event.accepted = true
-    }
-  }
+shim = f"""import QtQuick
 
-  function forcePasswordFocus() {
-''')
+// {mark}: generated by omarchy-greeter (lib/patch-lock.py) from Omarchy's
+// LockView.qml, which is kept unchanged as StockLockView.qml.
+//
+// Declares everything Omarchy's layout declares, so whatever the lock logic
+// passes in loads, then shows omarchy-greeter's layout (GreeterLockView.qml)
+// with whatever of it that layout takes. If that layout does not load, it
+// shows Omarchy's own instead: the screen stays locked either way.
+Item {{
+  id: root
 
-rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who has never seen it — it
-''', '''    // Signed in as: avatar and name above the password field.
-    Column {
-      id: identity
-      enabled: root.extrasEnabled
-      visible: root.displayName !== ""
-      anchors.bottom: inputField.top
-      anchors.bottomMargin: 32
-      anchors.horizontalCenter: inputField.horizontalCenter
-      spacing: 10
+{decl}
 
-      Item {
-        width: 96
-        height: 96
-        anchors.horizontalCenter: parent.horizontalCenter
+{sigs}
 
-        Rectangle {
-          anchors.fill: parent
-          radius: width / 2
-          color: Commons.Color.lock.borderActive
-          Text {
-            anchors.centerIn: parent
-            visible: avatarImage.status !== Image.Ready
-            text: root.initials(root.displayName)
-            color: Commons.Color.lock.background
-            font.family: Style.font.family
-            font.pixelSize: 34
-            font.bold: true
-          }
-        }
-        Image {
-          id: avatarImage
-          anchors.fill: parent
-          anchors.margins: 3
-          source: root.avatarPath ? "file://" + root.avatarPath : ""
-          sourceSize: Qt.size(256, 256)
-          fillMode: Image.PreserveAspectCrop
-          asynchronous: true
-          visible: false
-        }
-        Rectangle {
-          id: avatarMask
-          anchors.fill: avatarImage
-          radius: width / 2
-          visible: false
-          layer.enabled: true
-        }
-        MultiEffect {
-          anchors.fill: avatarImage
-          source: avatarImage
-          visible: avatarImage.status === Image.Ready
-          maskEnabled: true
-          maskSource: avatarMask
-          maskThresholdMin: 0.5
-          maskSpreadAtMin: 1.0
-        }
-      }
+  readonly property var forwardedProperties: [{names}]
+  readonly property var forwardedSignals: [{signal_names}]
 
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        textFormat: Text.PlainText
-        text: root.displayName
-        color: Commons.Color.lock.text
-        font.family: Style.font.family
-        font.pixelSize: Math.round(Style.font.heading * 1.5)
-        font.bold: true
-      }
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        textFormat: Text.PlainText
-        visible: !!root.currentUser.realName && root.currentUser.realName !== root.currentUser.name
-        text: root.currentUser.name || ""
-        color: Commons.Color.lock.placeholder
-        font.family: Style.font.family
-        font.pixelSize: Style.font.heading
-      }
-      Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        textFormat: Text.PlainText
-        text: "\\uf023  Locked"
-        color: Commons.Color.lock.borderActive
-        font.family: Style.font.family
-        font.pixelSize: Style.font.heading
-        topPadding: 2
-      }
-    }
+  // Which layout is showing, for checks (omarchy-greeter's tests).
+  readonly property string loadedLayout: view.status === Loader.Ready ? String(view.source).split("/").pop() : ""
+  readonly property var layout: view.item
 
-    // Other accounts signed in, and switching to the login screen.
-    Row {
-      id: switchRow
-      enabled: root.extrasEnabled
-      visible: root.extrasEnabled
-      anchors.top: inputField.bottom
-      anchors.topMargin: root.fingerprintConfigured && root.fingerprintUnavailable ? 72 : 28
-      anchors.horizontalCenter: inputField.horizontalCenter
-      spacing: 10
+  function forcePasswordFocus() {{ if (view.item && view.item.forcePasswordFocus) view.item.forcePasswordFocus() }}
+  function clearPassword() {{ if (view.item && view.item.clearPassword) view.item.clearPassword() }}
 
-      Repeater {
-        model: root.otherUsers
-        delegate: Rectangle {
-          required property var modelData
-          height: 38
-          width: chipText.implicitWidth + 32
-          radius: height / 2
-          color: Commons.Color.lock.background
-          border.width: activeFocus ? 2 : 1
-          border.color: chipMouse.containsMouse || activeFocus ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
-          objectName: "omarchyGreeterSwitch"
-          activeFocusOnTab: true
-          Keys.onPressed: function(event) { root.switchKey(event, function() { root.switchUserRequested(modelData.name) }) }
-          Text {
-            id: chipText
-            anchors.centerIn: parent
-            textFormat: Text.PlainText
-            text: "\\u{f0004}  " + (modelData.realName || modelData.name) + "  \\u00b7 signed in"
-            color: Commons.Color.lock.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.heading
-          }
-          MouseArea {
-            id: chipMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.switchUserRequested(modelData.name)
-          }
-        }
-      }
+  Loader {{
+    id: view
+    anchors.fill: parent
+    focus: true
+    source: "GreeterLockView.qml"
+    onStatusChanged: {{
+      if (status === Loader.Error && String(source).indexOf("StockLockView.qml") < 0) {{
+        console.warn("omarchy-greeter: the lock layout did not load; showing Omarchy's own")
+        source = "StockLockView.qml"
+      }}
+    }}
+    onLoaded: {{
+      for (var i = 0; i < root.forwardedProperties.length; i++) {{
+        var name = root.forwardedProperties[i]
+        if (!(name in item)) continue
+        item[name] = Qt.binding((function(n) {{ return function() {{ return root[n] }} }})(name))
+      }}
+      for (var j = 0; j < root.forwardedSignals.length; j++) {{
+        var signalName = root.forwardedSignals[j]
+        if (item[signalName] && typeof item[signalName].connect === "function") item[signalName].connect(root[signalName])
+      }}
+    }}
+  }}
+}}
+"""
 
-      Rectangle {
-        height: 38
-        width: switchText.implicitWidth + 32
-        radius: height / 2
-        color: Commons.Color.lock.background
-        border.width: activeFocus ? 2 : 1
-        border.color: switchMouse.containsMouse || activeFocus ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
-        objectName: "omarchyGreeterSwitch"
-        activeFocusOnTab: true
-        Keys.onPressed: function(event) { root.switchKey(event, function() { root.switchUserRequested("") }) }
-        Text {
-          id: switchText
-          anchors.centerIn: parent
-          textFormat: Text.PlainText
-          text: "\\u{f0019}  Switch user"
-          color: Commons.Color.lock.text
-          font.family: Style.font.family
-          font.pixelSize: Style.font.heading
-        }
-        MouseArea {
-          id: switchMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.switchUserRequested("")
-        }
-      }
-    }
-
-    // The crossed-out icon has no meaning to a user who has never seen it — it
-''')
-
-for name, text in files.items():
+# All checks passed: write. The stock layout first, so a half-done write can
+# never leave a LockView.qml that points at a missing file.
+(clone / "StockLockView.qml").write_text(stock_view)
+for name, text in ui.items():
     (clone / name).write_text(text)
+(clone / "Service.qml").write_text(files["Service.qml"])
+(clone / "LockView.qml").write_text(shim)
