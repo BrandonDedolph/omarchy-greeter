@@ -1,22 +1,57 @@
 #!/bin/bash
-# Open the login screen on a new console while this session stays as it is
-# (call it from the lock screen, so it stays locked). With a user name, the
-# login screen opens with that account selected.
+# Switch user from the lock screen, while this session stays locked.
+#
+#   omarchy-greeter-switch [account]
+#
+# An account that is signed in with its screen locked: switch straight to its
+# session, where its own lock screen asks for its password (like Windows; no
+# login screen to start, so it takes a moment instead of seconds). Anything
+# else (an account that is not signed in, or whose session does not say it is
+# locked): open the login screen on a new console, with the account selected.
 set -euo pipefail
 target=${1:-}
+[[ $target =~ ^[a-z_][a-z0-9_-]*$ ]] || target=""
+LOGINCTL=${LOGINCTL:-loginctl}
+BUSCTL=${BUSCTL:-busctl}
+
+# The id of $1's graphical session on seat0 that reports itself locked.
+locked_session() {
+  local id props
+  for id in $("$LOGINCTL" list-sessions --json=short 2>/dev/null |
+      jq -r --arg u "$1" '.[] | select(.user == $u and .seat == "seat0") | .session' 2>/dev/null); do
+    [[ $id =~ ^[0-9A-Za-z]+$ ]] || continue
+    props=$("$LOGINCTL" show-session "$id" -p Class -p Type -p State -p LockedHint 2>/dev/null) || continue
+    grep -qx 'Class=user' <<<"$props" || continue
+    grep -qxE 'Type=(wayland|x11)' <<<"$props" || continue
+    grep -qx 'State=closing' <<<"$props" && continue
+    # Never reveal a session that is not locked.
+    grep -qx 'LockedHint=yes' <<<"$props" || continue
+    echo "$id"
+    return 0
+  done
+  return 1
+}
+
+if [[ -n $target && $target != "$(id -un)" ]] && id=$(locked_session "$target"); then
+  if "$BUSCTL" --system call org.freedesktop.login1 /org/freedesktop/login1 \
+      org.freedesktop.login1.Manager ActivateSession s "$id" >/dev/null 2>&1; then
+    exit 0
+  fi
+fi
+
+# The login screen. It reads the selected account from switch-to, which
+# publish-view copies for it within moments; the login screen itself takes
+# about a second to start, and checks again shortly after it opens.
 dir="/var/lib/omarchy-greeter/$(id -un)"
-# A plain switch clears any earlier choice, so it is never replayed.
-[[ -n $target && $target =~ ^[a-z_][a-z0-9_-]*$ ]] || target=""
 if [[ -w $dir ]]; then
-  if [[ -z $target ]]; then rm -f "$dir/switch-to"; fi
+  if [[ -n $target ]]; then
+    printf '%s %s\n' "$(date +%s)" "$target" > "$dir/.switch-to.tmp"
+    chmod 600 "$dir/.switch-to.tmp"
+    mv -f "$dir/.switch-to.tmp" "$dir/switch-to"
+  else
+    # A plain switch clears any earlier choice, so it is never replayed.
+    rm -f "$dir/switch-to"
+  fi
 fi
-if [[ -n $target && -w $dir ]]; then
-  printf '%s %s\n' "$(date +%s)" "$target" > "$dir/.switch-to.tmp"
-  chmod 600 "$dir/.switch-to.tmp"
-  mv -f "$dir/.switch-to.tmp" "$dir/switch-to"
-  # publish-view copies it for the login screen within moments; give it a
-  # head start on the login screen opening.
-  sleep 0.3
-fi
-exec busctl --system call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
+exec "$BUSCTL" --system call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
   org.freedesktop.DisplayManager.Seat SwitchToGreeter

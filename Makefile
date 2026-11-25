@@ -21,6 +21,7 @@ install:
 		install -Dm644 "theme/$$f.qml" "$(DESTDIR)/usr/lib/omarchy-greeter/lock-ui/$$f.qml"; \
 	done
 	install -Dm755 lib/prepare-dirs "$(DESTDIR)/usr/lib/omarchy-greeter/prepare-dirs"
+	install -Dm755 lib/greeter-compositor "$(DESTDIR)/usr/lib/omarchy-greeter/greeter-compositor"
 	install -Dm755 lib/publish-view "$(DESTDIR)/usr/lib/omarchy-greeter/publish-view"
 	install -Dm644 systemd/system/omarchy-greeter-view@.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.service"
 	install -Dm644 systemd/system/omarchy-greeter-view@.path "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.path"
@@ -43,7 +44,7 @@ install:
 	install -Dm644 keys/allowed_signers "$(DESTDIR)/usr/share/omarchy-greeter/allowed_signers"
 	install -Dm644 LICENSE "$(DESTDIR)/usr/share/licenses/omarchy-greeter/LICENSE"
 
-SHELL_SCRIPTS = bin/* lib/boot-unlock-mark lib/boot-unlock-auth lib/prepare-dirs hooks/post-update omarchy-greeter.install scripts/release scripts/install.sh tests/run tests/*.sh
+SHELL_SCRIPTS = bin/* lib/boot-unlock-mark lib/boot-unlock-auth lib/prepare-dirs lib/greeter-compositor hooks/post-update omarchy-greeter.install scripts/release scripts/install.sh tests/run tests/*.sh
 
 # Static checks: syntax, shellcheck, QML.
 check:

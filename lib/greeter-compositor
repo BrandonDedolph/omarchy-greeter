@@ -1,0 +1,16 @@
+#!/bin/bash
+# Starts the login screen's compositor (SDDM's CompositorCommand).
+#
+# Workaround: Hyprland with aquamarine 0.15.x crashes on exit with more than
+# one monitor (https://github.com/hyprwm/aquamarine/issues/383), and SDDM
+# switches back to the session only once the login screen's compositor is
+# gone. Writing the core dump made every login from the login screen about
+# half a second slower. A core size limit of exactly 1 byte makes the kernel
+# skip the dump (the crash is still logged); nothing else changes. Remove once
+# aquamarine is fixed.
+#
+#   greeter-compositor [Hyprland arguments...]
+if command -v prlimit >/dev/null 2>&1; then
+  exec prlimit --core=1 start-hyprland -- "$@"
+fi
+exec start-hyprland -- "$@"

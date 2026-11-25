@@ -289,10 +289,19 @@ Rectangle {
     })
     readText(dir + "theme.name", function(text) { setLook(name, "theme", text.trim()) })
     readSession(name)
-    // A lock screen's "Switch user" names the account to preselect.
-    // Only a request made just before this login screen opened counts, and
-    // the newest one wins (several accounts may have left one).
-    readText(dir + "switch-to", function(text) {
+    readSwitchTo(name)
+    readText(dir + "video", function(text) {
+      var file = text.trim()
+      setLook(name, "video", /^background\.(mp4|webm|mkv|mov|m4v)$/.test(file) ? fileUrl(dir + file) : "")
+    })
+  }
+
+  // A lock screen's "Switch user" names the account to preselect.
+  // Only a request made just before this login screen opened counts, and
+  // the newest one wins (several accounts may have left one). Read again
+  // shortly after opening, in case the request was still being copied.
+  function readSwitchTo(name) {
+    readText(dataDir + "/" + name + "/switch-to", function(text) {
       var parts = text.trim().split(" ")
       var stamp = Number(parts[0])
       if (parts.length !== 2 || !(stamp > 0)) return
@@ -302,10 +311,11 @@ Rectangle {
       root.requestedUser = parts[1]
       root.applyRequestedUser()
     })
-    readText(dir + "video", function(text) {
-      var file = text.trim()
-      setLook(name, "video", /^background\.(mp4|webm|mkv|mov|m4v)$/.test(file) ? fileUrl(dir + file) : "")
-    })
+  }
+  Timer {
+    interval: 400
+    running: root.showsUi
+    onTriggered: { for (var i = 0; i < root.users.length; i++) root.readSwitchTo(root.users[i].name) }
   }
 
   // ---- palette (follows the selected user's theme) -----------------------

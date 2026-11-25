@@ -9,9 +9,12 @@ What changed in each release, for the people using it. Newest first.
 - **The lock screen is now where you sign back in.** It looks the same as
   the login screen: your account in the middle, every account in the
   bottom-left (with "Signed in" next to the ones that are), the computer's
-  name top-left, and Sleep, Restart and Shut down bottom-right. Pick another
-  account to open the login screen with it selected; your session stays
-  locked and running.
+  name top-left, and Sleep, Restart and Shut down bottom-right. Your session
+  stays locked and running while someone else uses the computer.
+- **Fast switching between signed-in accounts.** Picking an account that is
+  already signed in goes straight to its own lock screen, in a moment
+  instead of seconds. Picking one that is not signed in opens the login
+  screen with it selected.
 - **New look for the login screen:** the selected account centered, every
   account listed bottom-left, and your blurred wallpaper behind it.
 - **Shows who is signed in** using the system's own session list, so it is
@@ -29,6 +32,10 @@ What changed in each release, for the people using it. Newest first.
 
 ### Behind the scenes
 
+- **Faster return from the login screen:** Hyprland crashes when the login
+  screen closes ([aquamarine #383](https://github.com/hyprwm/aquamarine/issues/383)),
+  and saving a crash report for it delayed every login by about half a
+  second. The login screen's compositor now skips that report.
 - Your background is blurred once, when you change it, instead of on every
   screen draw. That fixes faint lines, rings and bands some screens showed.
 - Releases are signed with one approval instead of one per file.

@@ -2,7 +2,7 @@
 
 A multi-user login screen and lock screen for [Omarchy](https://omarchy.org). For computers that more than one person uses, or one person with separate accounts (work and personal, say).
 
-- **Works like Windows.** Your account in the middle, every account on the machine in the bottom-left, Sleep, Restart and Shut down in the bottom-right. The lock screen is the same screen: you sign back in right there, or pick another account to switch user while your session stays locked and running.
+- **Works like Windows.** Your account in the middle, every account on the machine in the bottom-left, Sleep, Restart and Shut down in the bottom-right. The lock screen is the same screen: you sign back in right there, or pick another account to switch user while your session stays locked and running. An account that is already signed in is one quick switch away (straight to its own lock screen); one that is not opens the login screen with it selected.
 - **Each account looks like its own desktop.** The login screen shows the selected account's Omarchy background, blurred (video too, if you allow it), and colors itself from that account's theme. Switching accounts wipes to the next background with the same reveal the desktop uses.
 - **Sized like the desktop.** Each account's monitor scale and Omarchy font size carry over to the login screen.
 - **Knows who is signed in.** Accounts with a session running say **Signed in**, straight from the system's session list.
@@ -132,6 +132,8 @@ It works by adding one line to the top of `/etc/pam.d/sddm` (`pam_exec` of `/usr
 - **Signed in** comes from logind: a root service refreshes it whenever a session starts or ends (`omarchy-greeter-sessions.path`).
 - **Backgrounds are blurred once**, when an account publishes a new one, not on every frame; that keeps the screens free of banding and seams.
 - **A session out of sight is always locked.** If another account or the login screen comes to the front while a session is unlocked, that session locks itself (`omarchy-greeter-guard`, which works with either lock screen).
+- **Switching between signed-in accounts skips the login screen.** Picking an account whose session is signed in and locked asks logind to bring that session to the front (`omarchy-greeter-switch`), where its own lock screen takes its password. Only a session that reports itself locked is switched to; anything else goes through the login screen, which asks for the password first. This needs no extra permission: logind already lets the person at the computer switch between sessions.
+- **The login screen's compositor skips crash reports** (`lib/greeter-compositor`): Hyprland currently crashes on exit with more than one monitor ([aquamarine #383](https://github.com/hyprwm/aquamarine/issues/383)), and writing the report delayed every login by about half a second.
 - **Switching back takes one password.** When you log back into your locked session from the login screen, SDDM asks logind to unlock it, and the lock screen follows once your session is in front again. Your own lock screen checks your password itself, as Omarchy's does, so unlocking where you left off never leaves your session.
 
 ## Development
