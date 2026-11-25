@@ -418,47 +418,19 @@ Rectangle {
   // Frosted glass behind the card: the scene blurred and tinted with the
   // theme background, so any wallpaper (even one with a centered logo) stays
   // readable.
-  Item {
+  // A plain translucent panel behind the form. (A live blur with a soft
+  // mask edge here stepped into visible rings on dark backgrounds.)
+  Rectangle {
     id: frost
     x: card.x - 44 * root.ui
     y: card.y - 36 * root.ui
     width: card.width + 88 * root.ui
     height: card.height + 72 * root.ui
     opacity: card.opacity
-
-    ShaderEffectSource {
-      id: frostSource
-      anchors.fill: parent
-      sourceItem: scene
-      sourceRect: Qt.rect(frost.x, frost.y, frost.width, frost.height)
-      visible: false
-    }
-    Rectangle {
-      id: frostMask
-      anchors.fill: parent
-      radius: 28 * root.ui
-      visible: false
-      layer.enabled: true
-    }
-    MultiEffect {
-      anchors.fill: parent
-      source: frostSource
-      blurEnabled: true
-      blur: 1.0
-      blurMax: 64
-      saturation: 0.1
-      maskEnabled: true
-      maskSource: frostMask
-      maskThresholdMin: 0.5
-      maskSpreadAtMin: 1.0
-    }
-    Rectangle {
-      anchors.fill: parent
-      radius: frostMask.radius
-      color: root.alpha(root.cBackground, 0.55)
-      border.width: 1
-      border.color: root.alpha(root.cForeground, 0.12)
-    }
+    radius: 28 * root.ui
+    color: root.alpha(root.cBackground, 0.78)
+    border.width: 1
+    border.color: root.alpha(root.cForeground, 0.14)
   }
 
   Column {
