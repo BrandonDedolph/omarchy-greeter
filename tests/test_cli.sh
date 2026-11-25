@@ -65,6 +65,11 @@ for step in "_set primary DP-1" "_video yes" "_install /dev/null /dev/null 1.0.0
   check_not "$step needs root" og $step
 done
 
+printf 'primary=\nboot_unlock=alex,sam\n' > "$conf"
+equal "status: boot pass" "One password at boot:        on for alex, sam" "$(og status | grep 'One password')"
+printf 'boot_unlock=no\n' > "$conf"
+equal "status: boot pass off" "One password at boot:        off" "$(og status | grep 'One password')"
+equal "status: monitor" "Login and lock forms on:     all" "$(og status | grep 'forms on')"
 check "help" og --help
 check "version" og --version
 check "status" og status

@@ -472,7 +472,9 @@ cmd_status() {
   local accounts boot_status
   accounts=$(boot_pass_accounts)
   boot_status=$(head -c 200 /run/omarchy-greeter/boot-unlock-status 2>/dev/null || true)
-  echo "One password at boot:        ${accounts:+on for ${accounts//,/, }}${accounts:-off}${boot_status:+ (this boot: $boot_status)}"
+  local boot="off"
+  [[ -n $accounts ]] && boot="on for ${accounts//,/, }"
+  echo "One password at boot:        $boot${boot_status:+ (this boot: $boot_status)}"
   echo "Video backgrounds at login:  $(cmd_video)"
   echo "Multi-user lock (you):       $(cmd_lock)"
   echo "Your look on login screen:   $(cmd_publish)"

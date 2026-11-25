@@ -48,9 +48,17 @@ info=$(bsdtar -xOf "$file" .PKGINFO)
   die "the signed package is not omarchy-greeter $version; not installing"
 echo "Signature verified."
 
-# The terminal, not the pipe this script arrived on, answers sudo.
-# shellcheck disable=SC2024
-sudo pacman -U --noconfirm "$file" < /dev/tty
+# The terminal, not the pipe this script arrived on, answers sudo. Without
+# a terminal (run from a launcher or another program), Omarchy's password
+# dialog asks instead.
+if (exec 3</dev/tty) 2>/dev/null; then
+  # shellcheck disable=SC2024
+  sudo pacman -U --noconfirm "$file" < /dev/tty
+elif command -v pkexec >/dev/null; then
+  pkexec pacman -U --noconfirm "$file"
+else
+  die "no terminal to ask for your password; run this in a terminal"
+fi
 cat <<'EOF'
 
 omarchy-greeter is installed. Log out (or reboot) to see the new login screen.
