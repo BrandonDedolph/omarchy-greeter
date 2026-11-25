@@ -44,7 +44,7 @@ To pick the monitor for the login and lock forms, open **Setup > Login & Lock > 
 
 ## Updates
 
-omarchy-greeter updates itself when you run `omarchy update`: at the end, Omarchy runs omarchy-greeter's update hook, which installs a newer release if there is one. Every release is signed, and the update is installed only if its signature matches the release key the installed version ships with. Releases and their notes are on the [releases page](https://github.com/BrandonDedolph/omarchy-greeter/releases).
+omarchy-greeter updates itself when you run `omarchy update`: at the end, Omarchy runs omarchy-greeter's update hook, which installs a newer release if there is one. Every release is signed, and the update is installed only if its signature matches the release key the installed version ships with. What changed in each version is in [CHANGELOG.md](CHANGELOG.md), and on the [releases page](https://github.com/BrandonDedolph/omarchy-greeter/releases).
 
 ```bash
 omarchy-greeter update --check     # is there a newer release?
@@ -139,7 +139,7 @@ QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
 
 `make check` runs the static checks (bash syntax, shellcheck, QML and Lua syntax) and `make test` the tests, which run in temporary folders with stand-ins for root and Omarchy, so they never touch the real system. Both run on every push, and weekly against Omarchy's latest lock screen, so an Omarchy change that breaks the patch shows up before users hit it. Set `OMARCHY_LOCK_SOURCES=/path/to/omarchy/shell/plugins/lock` to also test the patch against another copy of the lock.
 
-To release a version (maintainers): `scripts/release 1.1.0`. It checks the tree, builds the package from a clean export, signs it with the release key (an SSH key, `keys/allowed_signers`), tags `v1.1.0` and creates the GitHub release with the package, its signature and `install.sh`. Installed copies pick it up at their next `omarchy update`.
+To release a version (maintainers): write what changed under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md), then `scripts/release 1.1.0`. The release notes are that section (the release refuses to go out without it). It checks the tree, builds the package from a clean export, signs it with the release key (an SSH key, `keys/allowed_signers`), tags `v1.1.0` and creates the GitHub release with the package, its signature and `install.sh`. Installed copies pick it up at their next `omarchy update`.
 
 For screenshots without real account names, add `demoUsers=alex:Alex Rivera,sam:Sam Chen` (and optionally `demoHost=`) to a copy of `theme.conf`, with `dataDir=` pointing at sample looks.
 

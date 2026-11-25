@@ -7,12 +7,14 @@
 #
 # A release:
 # 1. checks the tree is clean and in sync with origin, and runs `make check`;
-# 2. sets the version in PKGBUILD and commits;
+# 2. sets the version in PKGBUILD, turns CHANGELOG.md's "## Unreleased"
+#    section into this version's (it must not be empty), and commits;
 # 3. builds the package from the tagged code (a clean export, not this tree);
 # 4. signs it with the release key (an SSH key held in 1Password, so 1Password
 #    asks to approve) and checks the signature against keys/allowed_signers;
 # 5. pushes, and creates the GitHub release with the package, its signature
-#    and install.sh (with the release key built in), notes from the commits.
+#    and install.sh (with the release key built in); its notes are that
+#    CHANGELOG.md section.
 #    The tag is created only once the package is built and signed.
 #
 # Installed copies pick it up through `omarchy update` (omarchy-greeter update).
@@ -103,13 +105,27 @@ git fetch -q origin
 git rev-parse -q --verify "refs/tags/$tag" >/dev/null && die "$tag already exists"
 [[ -r $SIGNING_KEY ]] || die "release key not found at $SIGNING_KEY"
 grep -qF "$(cut -d' ' -f2 "$SIGNING_KEY")" keys/allowed_signers || die "$SIGNING_KEY is not in keys/allowed_signers"
+# The release notes: CHANGELOG.md's "## Unreleased" section.
+changelog_section() {  # changelog_section <heading>: the lines under it
+  awk -v want="## $1" '
+    index($0, "## ") == 1 { if (found) exit; found = ($0 == want || index($0, want " ") == 1); next }
+    found' CHANGELOG.md
+}
+unwrap_notes() {  # continuation lines (indented, or plain text after text) join the line above
+  awk 'NF == 0 || /^(#|- |\* |[0-9]+\. )/ { if (line != "") print line; line = $0; if (NF == 0) { print ""; line = "" }; next }
+       { sub(/^ +/, ""); line = (line == "" ? $0 : line " " $0) }
+       END { if (line != "") print line }'
+}
+notes=$(changelog_section Unreleased)
+[[ -n ${notes//[[:space:]]/} ]] || die "CHANGELOG.md has nothing under \"## Unreleased\"; write what changed first"
 make check
 
 step "Versioning $tag"
+sed -i "s/^## Unreleased\$/## $version ($(date +%F))/" CHANGELOG.md
 sed -i -E "s/^pkgver=.*/pkgver=$version/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
 sed -i -E "s/^Version=.*/Version=$version/" theme/metadata.desktop
-if [[ -n $(git status --porcelain PKGBUILD theme/metadata.desktop) ]]; then
-  git commit -q -m "Release $tag" PKGBUILD theme/metadata.desktop
+if [[ -n $(git status --porcelain PKGBUILD theme/metadata.desktop CHANGELOG.md) ]]; then
+  git commit -q -m "Release $tag" PKGBUILD theme/metadata.desktop CHANGELOG.md
 fi
 
 # Undo the version commit if anything below fails before publishing.
@@ -138,7 +154,14 @@ pacman -U --print "$pkg" >/dev/null || { undo; die "pacman does not accept the p
 step "Publishing"
 git tag -a "$tag" -m "omarchy-greeter $version"
 git push -q origin main "$tag"
-gh release create "$tag" --verify-tag --title "omarchy-greeter $version" --generate-notes \
+notes_file="$build/notes.md"
+{
+  # GitHub shows single line breaks as-is: join each wrapped item onto one line.
+  printf '%s\n' "$notes" | sed '/./,$!d' | unwrap_notes
+  # shellcheck disable=SC2016  # literal backticks: markdown
+  printf '\n**Install or update:** `omarchy-greeter update`, or see the README.\n'
+} > "$notes_file"
+gh release create "$tag" --verify-tag --title "omarchy-greeter $version" --notes-file "$notes_file" \
   "$pkg" "$pkg.sshsig" "$build/install.sh" "$build/install.sh.sshsig"
 echo
 echo "Released $tag: https://github.com/BrandonDedolph/omarchy-greeter/releases/tag/$tag"
