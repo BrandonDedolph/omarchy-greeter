@@ -33,6 +33,18 @@ post_upgrade() {
 }
 
 pre_remove() {
+  # Take the Setup > Login & Lock rows out of every account's Omarchy menu.
+  local home user
+  while IFS=: read -r user _ _ _ _ home _; do
+    [[ -f $home/.config/omarchy/extensions/omarchy-menu.jsonc ]] || continue
+    runuser -u "$user" -- env HOME="$home" /usr/bin/omarchy-greeter menu remove >/dev/null 2>&1 || true
+  done < <(getent passwd)
+  # Put Omarchy's own lock screen back for every account.
+  while IFS=: read -r user _ _ _ _ home _; do
+    [[ -d $home/.config/omarchy/plugins/$user.lock ]] || continue
+    runuser -u "$user" -- env HOME="$home" USER="$user" /usr/bin/omarchy-greeter-lock-setup --uninstall >/dev/null 2>&1 || true
+  done < <(getent passwd)
+  echo "omarchy-greeter: log out and back in to finish switching back to Omarchy's lock screen."
   remove_pam_line
   systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
   systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service || true

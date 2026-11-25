@@ -38,6 +38,12 @@ MAX_VIDEO_BYTES=$((150 * 1024 * 1024))
 
 log() { echo "omarchy-greeter-sync: $*" >&2; }
 
+# Opted out (omarchy-greeter publish off): the login screen shows the
+# default look for this account.
+if [[ -e ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter/no-publish ]]; then
+  exit 0
+fi
+
 if [[ ! -d $DEST || ! -w $DEST ]]; then
   log "$DEST is missing or not writable; run: sudo systemctl start omarchy-greeter-dirs"
   exit 0
@@ -186,6 +192,11 @@ done
 [[ -n $video && -e $work/$video ]] && mv -f "$work/$video" "$DEST/$video"
 
 log "published ${background:-no background} for $USER_NAME$( (( unchanged )) && echo ' (background unchanged)')"
+
+# The Setup > Login & Lock entries in the Omarchy menu (kept current).
+if (( ! offline )) && [[ -z ${OMARCHY_GREETER_DIR:-} ]] && command -v omarchy-greeter >/dev/null; then
+  omarchy-greeter menu ensure >/dev/null || log "could not add the menu entries"
+fi
 
 # First run for this user in a session: set up the improved lock screen.
 if (( ! offline )) && [[ -z ${OMARCHY_GREETER_DIR:-} ]] && command -v omarchy-greeter-lock-setup >/dev/null; then

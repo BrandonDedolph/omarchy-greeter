@@ -52,6 +52,7 @@ Rectangle {
       root.primaryOutput = m ? m[1] : ""
     })
     password.forceActiveFocus()
+    addDemoUsers()
   }
 
   readonly property string syncFile: (typeof config !== "undefined" && config.syncFile) ? String(config.syncFile) : "/var/lib/sddm/omarchy-greeter-selected"
@@ -91,9 +92,21 @@ Rectangle {
   property var looks: ({})        // name -> { colors, background, video, avatar, theme }
   readonly property var look: userName && looks[userName] ? looks[userName] : null
 
+  // Demo accounts for screenshots: theme.conf demoUsers=name:Real Name,...
+  // (unset in normal use; the real accounts come from SDDM).
+  readonly property string demoUsers: String(config.demoUsers || "")
+  function addDemoUsers() {
+    if (!demoUsers) return
+    var list = demoUsers.split(",")
+    for (var i = 0; i < list.length; i++) {
+      var parts = list[i].split(":")
+      if (parts[0]) root.addUser({ name: parts[0].trim(), realName: (parts[1] || "").trim(), icon: "" })
+    }
+  }
+
   Repeater {
     id: userCollector
-    model: userModel
+    model: root.demoUsers ? 0 : userModel
     delegate: Item {
       required property string name
       required property string realName
@@ -760,7 +773,7 @@ Rectangle {
     anchors.bottom: parent.bottom
     anchors.margins: 28 * root.ui
     textFormat: Text.PlainText
-    text: "  " + sddm.hostName + (root.look && root.look.theme ? "     " + root.look.theme : "")
+    text: "  " + (config.demoHost || sddm.hostName) + (root.look && root.look.theme ? "     " + root.look.theme : "")
     color: root.alpha(root.cForeground, 0.8)
     font.family: root.fontFamily
     font.pixelSize: 14 * root.ui

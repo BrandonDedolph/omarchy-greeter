@@ -1,0 +1,326 @@
+#!/bin/bash
+# omarchy-greeter: settings and accounts for the Omarchy multi-user login and
+# lock screens.
+#
+#   omarchy-greeter status                      show every setting
+#
+# Machine-wide (asks for an admin password):
+#   omarchy-greeter monitor [focused|all|<name>]  which monitor shows the login and lock forms
+#   omarchy-greeter boot-pass [on|off|toggle]   disk password at boot also logs you in once
+#
+# Your own account:
+#   omarchy-greeter lock [on|off|toggle]        the multi-user lock screen (who is signed in, switch user)
+#   omarchy-greeter publish [on|off|toggle]     show your theme and background on the login screen
+#
+# Accounts (asks for an admin password):
+#   omarchy-greeter user list
+#   omarchy-greeter user add [name]             create an account (asks the rest)
+#   omarchy-greeter user admin <name> [on|off]  allow or stop admin rights (sudo, system dialogs)
+#
+# The Omarchy menu:
+#   omarchy-greeter menu [install|remove]       Setup > Login & Lock in the Omarchy menu
+#
+# With no argument after a setting, prints its current value.
+
+set -euo pipefail
+
+CONF=/etc/omarchy-greeter.conf
+DATA=/var/lib/omarchy-greeter
+USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter"
+NO_PUBLISH="$USER_CONF/no-publish"
+NO_LOCK="$USER_CONF/no-primary-lock"
+SELF=/usr/bin/omarchy-greeter
+
+die() { echo "omarchy-greeter: $*" >&2; exit 1; }
+notify() { notify-send -a "Login & Lock" "$@" 2>/dev/null || true; }
+
+conf_get() {
+  sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]#]*).*/\1/p" "$CONF" 2>/dev/null | tail -n1
+}
+
+# Run this command again as root: sudo in a terminal, the graphical password
+# dialog otherwise (from the menu).
+as_root() {
+  if (( EUID == 0 )); then
+    "$SELF" "$@"
+  elif [[ -t 0 ]]; then
+    sudo "$SELF" "$@"
+  else
+    pkexec "$SELF" "$@"
+  fi
+}
+
+# ---- machine-wide settings (root) ---------------------------------------
+
+root_set() {  # root_set <key> <value>, only the known keys and values
+  (( EUID == 0 )) || die "must run as root"
+  local key=$1 value=$2
+  case $key in
+    primary) [[ $value =~ ^[A-Za-z0-9_.-]*$ ]] || die "not a monitor name: $value" ;;
+    boot_unlock) [[ $value == "yes" || $value == "no" ]] || die "boot_unlock is yes or no" ;;
+    *) die "unknown setting: $key" ;;
+  esac
+  [[ -f $CONF && ! -L $CONF ]] || install -m 644 /dev/null "$CONF"
+  if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
+    sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key=$value|" "$CONF"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$CONF"
+  fi
+}
+
+cmd_monitor() {
+  local want=${1:-}
+  if [[ -z $want ]]; then
+    local current
+    current=$(conf_get primary)
+    echo "${current:-all}"
+    return
+  fi
+  case $want in
+    all) want="" ;;
+    focused)
+      want=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name' | head -n1)
+      [[ -n $want ]] || die "no focused monitor (run this inside the desktop)"
+      ;;
+  esac
+  as_root _set primary "$want"
+  if [[ -n $want ]]; then
+    notify "Login and lock screens" "Shown on $want only; other monitors stay black."
+    echo "Login and lock forms on $want."
+  else
+    notify "Login and lock screens" "Shown on every monitor."
+    echo "Login and lock forms on every monitor."
+  fi
+}
+
+cmd_boot_pass() {
+  case ${1:-} in
+    "") [[ $(conf_get boot_unlock) == "yes" ]] && echo on || echo off ;;
+    on) as_root _set boot_unlock yes; notify "One password at boot" "On: after the disk password, the first login skips the account password." ;;
+    off) as_root _set boot_unlock no; notify "One password at boot" "Off: the login screen always asks for the account password." ;;
+    toggle) if [[ $(cmd_boot_pass) == "on" ]]; then cmd_boot_pass off; else cmd_boot_pass on; fi ;;
+    *) die "usage: omarchy-greeter boot-pass [on|off|toggle]" ;;
+  esac
+}
+
+# ---- per-account settings -----------------------------------------------
+
+cmd_lock() {
+  case ${1:-} in
+    "") [[ -e $NO_LOCK ]] && echo off || echo on ;;
+    on) omarchy-greeter-lock-setup ;;
+    off) omarchy-greeter-lock-setup --remove ;;
+    toggle) if [[ $(cmd_lock) == "on" ]]; then cmd_lock off; else cmd_lock on; fi ;;
+    *) die "usage: omarchy-greeter lock [on|off|toggle]" ;;
+  esac
+}
+
+cmd_publish() {
+  case ${1:-} in
+    "") [[ -e $NO_PUBLISH ]] && echo off || echo on ;;
+    on)
+      rm -f "$NO_PUBLISH"
+      omarchy-greeter-sync --now
+      notify "Login screen" "Shows your theme and background."
+      ;;
+    off)
+      mkdir -p "$USER_CONF" && touch "$NO_PUBLISH"
+      # Leave only what the login screen needs to know a session is running.
+      find "$DATA/$(id -un)" -mindepth 1 -maxdepth 1 ! -name session -exec rm -f {} + 2>/dev/null || true
+      notify "Login screen" "Shows the default look for your account."
+      ;;
+    toggle) if [[ $(cmd_publish) == "on" ]]; then cmd_publish off; else cmd_publish on; fi ;;
+    *) die "usage: omarchy-greeter publish [on|off|toggle]" ;;
+  esac
+}
+
+# ---- accounts (root) ----------------------------------------------------
+
+human_users() {
+  local min max
+  read -r min max < <(awk '/^UID_MIN/{a=$2} /^UID_MAX/{b=$2} END{print (a?a:1000), (b?b:60000)}' /etc/login.defs)
+  getent passwd | awk -F: -v min="$min" -v max="$max" \
+    '$3 >= min && $3 <= max && $7 !~ /(nologin|false)$/ {print $1}'
+}
+
+is_admin() { id -nG "$1" 2>/dev/null | tr ' ' '\n' | grep -qx wheel; }
+
+cmd_user_list() {
+  local name full
+  printf '%-20s %-28s %s\n' ACCOUNT NAME ADMIN
+  for name in $(human_users); do
+    full=$(getent passwd "$name" | cut -d: -f5 | cut -d, -f1)
+    printf '%-20s %-28s %s\n' "$name" "${full:--}" "$(is_admin "$name" && echo yes || echo no)"
+  done
+}
+
+valid_name() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
+
+cmd_user_add() {
+  [[ -t 0 ]] || die "run this in a terminal (it asks for the new password)"
+  local name=${1:-} full admin
+  if [[ -z $name ]]; then
+    name=$(gum input --placeholder "account name (lowercase, e.g. alex)" --header "New account") || exit 1
+  fi
+  valid_name "$name" || die "account names are lowercase letters, digits, - and _ (starting with a letter)"
+  getent passwd "$name" >/dev/null && die "$name already exists"
+  full=$(gum input --placeholder "Full name (optional)" --header "Name shown on the login screen") || exit 1
+  [[ $full != *:* ]] || die "the full name cannot contain ':'"
+  admin=no
+  gum confirm --default=false "Give $name admin rights (sudo, install software, system settings)?" && admin=yes
+  sudo "$SELF" _user-add "$name" "$full" "$admin"
+  echo "Account $name is ready. Pick it on the login screen (Super+Ctrl+L, then Switch user)."
+}
+
+root_user_add() {
+  (( EUID == 0 )) || die "must run as root"
+  local name=$1 full=$2 admin=$3
+  valid_name "$name" || die "bad account name"
+  getent passwd "$name" >/dev/null && die "$name already exists"
+  # /etc/skel carries Omarchy's configs; the desktop finishes setting the
+  # account up at its first login (omarchy-provision-first-run).
+  useradd --create-home --user-group --comment "$full" "$name"
+  if [[ $admin == "yes" ]]; then usermod -aG wheel "$name"; fi
+  echo "Choose a password for $name:"
+  if ! passwd "$name"; then
+    userdel --remove "$name" 2>/dev/null || true
+    die "no password set; $name was not created"
+  fi
+  # Its folder for the login screen, and its default look published.
+  systemctl restart omarchy-greeter-dirs.service || true
+}
+
+cmd_user_admin() {
+  local name=${1:-} want=${2:-}
+  [[ -n $name ]] || die "usage: omarchy-greeter user admin <name> [on|off]"
+  getent passwd "$name" >/dev/null || die "no account named $name"
+  case $want in
+    "") is_admin "$name" && echo on || echo off ;;
+    on|off) as_root _user-admin "$name" "$want" ;;
+    *) die "usage: omarchy-greeter user admin <name> [on|off]" ;;
+  esac
+}
+
+root_user_admin() {
+  (( EUID == 0 )) || die "must run as root"
+  local name=$1 want=$2 other admins=0
+  valid_name "$name" && getent passwd "$name" >/dev/null || die "no account named $name"
+  if [[ $want == "on" ]]; then
+    usermod -aG wheel "$name"
+    echo "$name now has admin rights (takes effect at its next login)."
+  else
+    for other in $(human_users); do
+      [[ $other != "$name" ]] && is_admin "$other" && admins=$((admins + 1))
+    done
+    (( admins > 0 )) || die "$name is the only admin; give another account admin rights first"
+    gpasswd -d "$name" wheel >/dev/null
+    echo "$name no longer has admin rights (takes effect at its next login)."
+  fi
+}
+
+# ---- the Omarchy menu ---------------------------------------------------
+# Omarchy reads menu additions from each user's
+# ~/.config/omarchy/extensions/omarchy-menu.jsonc, so the entries go there,
+# between two marker comments, and are rewritten in place on each install.
+
+MENU_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/extensions/omarchy-menu.jsonc"
+MENU_BEGIN="  // >>> omarchy-greeter (managed by: omarchy-greeter menu; edits here are replaced)"
+MENU_END="  // <<< omarchy-greeter"
+
+menu_entries() {
+  local term="omarchy-launch-floating-terminal-with-presentation"
+  cat <<EOF
+  "setup.greeter": {"icon":"󰍂","label":"Login & Lock","title":"Login","description":"login screen lock screen users accounts admin monitor"},
+  "setup.greeter.monitor": {"icon":"󰍹","label":"Monitor","title":"Login Monitor"},
+  "setup.greeter.monitor.focused": {"icon":"󰍹","label":"This One","description":"primary","checked":"[[ \$(omarchy-greeter monitor) == \$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name') ]]","action":"omarchy-greeter monitor focused"},
+  "setup.greeter.monitor.all": {"icon":"󰍺","label":"All","checked":"[[ \$(omarchy-greeter monitor) == all ]]","action":"omarchy-greeter monitor all"},
+  "setup.greeter.boot-pass": {"icon":"󰌾","label":"Boot Login","description":"disk password login","checked":"[[ \$(omarchy-greeter boot-pass) == on ]]","action":"omarchy-greeter boot-pass toggle"},
+  "setup.greeter.lock": {"icon":"󰷛","label":"User Lock","description":"switch user signed in","checked":"[[ \$(omarchy-greeter lock) == on ]]","action":"omarchy-greeter lock toggle"},
+  "setup.greeter.publish": {"icon":"󰸉","label":"My Look","description":"theme background","checked":"[[ \$(omarchy-greeter publish) == on ]]","action":"omarchy-greeter publish toggle"},
+  "setup.greeter.users": {"icon":"󰀄","label":"Accounts"},
+  "setup.greeter.users.add": {"icon":"󰀔","label":"Add","action":"$term 'omarchy-greeter user add'"},
+  "setup.greeter.users.admin": {"icon":"󰒃","label":"Admin","action":"$term 'omarchy-greeter user manage'"},
+  "setup.greeter.users.list": {"icon":"󰀉","label":"List","action":"$term 'omarchy-greeter user list'"},
+EOF
+}
+
+NO_MENU="$USER_CONF/no-menu"
+
+cmd_menu() {
+  local mode=${1:-install} tmp
+  case $mode in
+    install) rm -f "$NO_MENU" ;;
+    remove) mkdir -p "$USER_CONF" && touch "$NO_MENU" ;;
+    ensure)
+      # At login: add or refresh the entries, unless this user removed them.
+      [[ -e $NO_MENU ]] && return 0
+      if [[ -f $MENU_FILE ]] && diff -q <(awk -v b="$MENU_BEGIN" -v e="$MENU_END" '$0 == b {on=1; next} $0 == e {on=0} on' "$MENU_FILE") <(menu_entries) >/dev/null; then
+        return 0
+      fi
+      mode=install
+      ;;
+    *) die "usage: omarchy-greeter menu [install|remove]" ;;
+  esac
+  mkdir -p "${MENU_FILE%/*}"
+  [[ -f $MENU_FILE ]] || printf '{\n}\n' > "$MENU_FILE"
+  tmp=$(mktemp "$MENU_FILE.XXXXXX")
+  # Drop the old block, then (for install) put the new one right after the
+  # opening brace: every entry ends with a comma, which JSONC allows before
+  # whatever follows.
+  awk -v begin="$MENU_BEGIN" -v end="$MENU_END" '
+    $0 == begin {skip=1; next} skip && $0 == end {skip=0; next} !skip {print}' "$MENU_FILE" > "$tmp"
+  if [[ $mode == "install" ]]; then
+    local block
+    block="$(printf '%s\n' "$MENU_BEGIN"; menu_entries; printf '%s\n' "$MENU_END")"
+    awk -v block="$block" '!done && /^[[:space:]]*\{[[:space:]]*$/ {print; print block; done=1; next} {print}' "$tmp" > "$tmp.2"
+    grep -qF "$MENU_BEGIN" "$tmp.2" || { rm -f "$tmp" "$tmp.2"; die "could not find the opening { in $MENU_FILE"; }
+    mv -f "$tmp.2" "$tmp"
+  fi
+  mv -f "$tmp" "$MENU_FILE"
+  [[ $mode == "install" ]] && echo "Added Setup > Login & Lock to the Omarchy menu." || echo "Removed Login & Lock from the Omarchy menu."
+}
+
+# Pick an account and switch its admin rights (from the menu).
+cmd_user_manage() {
+  local name
+  name=$(human_users | gum choose --header "Admin rights for which account?") || exit 0
+  if is_admin "$name"; then
+    gum confirm "$name is an admin. Remove its admin rights?" && cmd_user_admin "$name" off
+  else
+    gum confirm "Give $name admin rights?" && cmd_user_admin "$name" on
+  fi
+}
+
+cmd_status() {
+  echo "Login and lock forms on:     $(cmd_monitor)"
+  echo "One password at boot:        $(cmd_boot_pass)"
+  echo "Multi-user lock (you):       $(cmd_lock)"
+  echo "Your look on login screen:   $(cmd_publish)"
+  echo
+  cmd_user_list
+}
+
+case ${1:-status} in
+  status) cmd_status ;;
+  monitor) shift; cmd_monitor "$@" ;;
+  boot-pass) shift; cmd_boot_pass "$@" ;;
+  lock) shift; cmd_lock "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
+  menu) shift; cmd_menu "$@" ;;
+  user)
+    shift
+    case ${1:-list} in
+      list) cmd_user_list ;;
+      add) shift; cmd_user_add "$@" ;;
+      admin) shift; cmd_user_admin "$@" ;;
+      manage) cmd_user_manage ;;
+      *) die "usage: omarchy-greeter user [list|add|admin]" ;;
+    esac
+    ;;
+  # Root-side steps, reached only through as_root/sudo above.
+  _set) shift; root_set "$@" ;;
+  _user-add) shift; root_user_add "$@" ;;
+  _user-admin) shift; root_user_admin "$@" ;;
+  -h|--help|help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command: $1 (see omarchy-greeter --help)" ;;
+esac

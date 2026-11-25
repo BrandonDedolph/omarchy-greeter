@@ -2,6 +2,14 @@
 # For the lock screen: who I am, and which other accounts are signed in on
 # this machine right now (one entry per account, graphical sessions only).
 set -euo pipefail
+
+# Demo data for screenshots ($XDG_RUNTIME_DIR is private to this account and
+# cleared at logout): {"me":{...},"others":[...]}
+demo="${XDG_RUNTIME_DIR:-/nonexistent}/omarchy-greeter-demo.json"
+if [[ -f $demo && -O $demo ]]; then
+  cat "$demo"
+  exit 0
+fi
 me=$(id -un)
 avatar="/var/lib/omarchy-greeter/$me/avatar.png"
 [[ -r $avatar ]] || avatar=""

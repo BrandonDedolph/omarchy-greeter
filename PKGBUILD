@@ -1,11 +1,12 @@
 # Local package: build with `makepkg -si` from this folder.
 pkgname=omarchy-greeter
-pkgver=2.6.1
+pkgver=3.0.0
 pkgrel=1
 pkgdesc="Multi-user Omarchy login screen that follows each user's background, theme and display scale"
+url="https://github.com/BrandonDedolph/omarchy-greeter"
 arch=(any)
 license=(MIT)
-depends=(sddm qt6-declarative qt6-multimedia imagemagick ffmpeg jq cryptsetup util-linux glib2 python)
+depends=(sddm qt6-declarative qt6-multimedia imagemagick ffmpeg jq cryptsetup util-linux glib2 python gum polkit)
 backup=(etc/omarchy-greeter.conf)
 install=omarchy-greeter.install
 source=()
@@ -17,6 +18,7 @@ package() {
   install -Dm755 bin/omarchy-greeter-presence "$pkgdir/usr/bin/omarchy-greeter-presence"
   install -Dm644 systemd/user/omarchy-greeter-presence.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-presence.service"
   install -Dm755 bin/omarchy-greeter-guard "$pkgdir/usr/bin/omarchy-greeter-guard"
+  install -Dm755 bin/omarchy-greeter "$pkgdir/usr/bin/omarchy-greeter"
   install -Dm644 systemd/user/omarchy-greeter-guard.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-guard.service"
   install -Dm644 systemd/user/omarchy-greeter-lock-update.service "$pkgdir/usr/lib/systemd/user/omarchy-greeter-lock-update.service"
   install -Dm755 bin/omarchy-greeter-sessions "$pkgdir/usr/bin/omarchy-greeter-sessions"

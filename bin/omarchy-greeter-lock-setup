@@ -45,10 +45,34 @@ remove_clone() {
   fi
 }
 
+# Package removal (run for each account, without its desktop running): put
+# Omarchy's own lock back by editing the files directly.
+if [[ ${1:-} == --uninstall ]]; then
+  if [[ -d $DIR ]] && grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null; then
+    rm -rf "$DIR"
+    config="$HOME/.config/omarchy/shell.json"
+    if [[ -f $config ]]; then
+      tmp=$(mktemp "$config.XXXXXX")
+      if jq --arg id "$ID" '
+          (if .plugins then .plugins |= map(select((.id? // .) != $id)) else . end)
+          | (if .disabledPlugins then .disabledPlugins -= ["omarchy.lock", $id] else . end)
+          | (if .cloneSourceRestores then .cloneSourceRestores -= [$id] else . end)' "$config" > "$tmp"; then
+        mv -f "$tmp" "$config"
+      else
+        rm -f "$tmp"
+      fi
+    fi
+  fi
+  rm -f "$HOOK"
+  exit 0
+fi
+
 if [[ ${1:-} == --remove ]]; then
   remove_clone
   rm -f "$HOOK"
   mkdir -p "${OPTOUT%/*}" && touch "$OPTOUT"
+  # The built-in lock only takes over cleanly in a fresh shell.
+  if omarchy-shell shell ping >/dev/null 2>&1; then omarchy restart shell >/dev/null 2>&1 || true; fi
   echo "Back to the built-in Omarchy lock screen."
   exit 0
 fi
