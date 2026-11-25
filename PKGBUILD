@@ -1,6 +1,6 @@
 # Local package: build with `makepkg -si` from this folder.
 pkgname=omarchy-greeter
-pkgver=2.1.1
+pkgver=2.1.2
 pkgrel=1
 pkgdesc="Multi-user Omarchy login screen that follows each user's background, theme and display scale"
 arch=(any)
@@ -18,6 +18,7 @@ package() {
   install -Dm755 lib/boot-unlock-mark "$pkgdir/usr/lib/omarchy-greeter/boot-unlock-mark"
   install -Dm755 lib/boot-unlock-auth "$pkgdir/usr/lib/omarchy-greeter/boot-unlock-auth"
   install -Dm644 systemd/system/omarchy-greeter-boot-unlock.service "$pkgdir/usr/lib/systemd/system/omarchy-greeter-boot-unlock.service"
+  install -Dm644 polkit/40-omarchy-self-admin.rules "$pkgdir/usr/share/polkit-1/rules.d/40-omarchy-self-admin.rules"
   install -Dm644 etc/omarchy-greeter.conf "$pkgdir/etc/omarchy-greeter.conf"
   install -Dm644 share/hyprland.lua "$pkgdir/usr/share/omarchy-greeter/hyprland.lua"
   install -Dm755 hooks/post-update "$pkgdir/usr/share/omarchy-greeter/hooks/post-update"

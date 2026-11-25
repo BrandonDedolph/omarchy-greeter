@@ -1,0 +1,12 @@
+// omarchy-greeter: on a machine with several admins, ask an admin for their
+// OWN password when they do something that needs admin rights, instead of
+// polkit's default "any member of wheel", which makes Omarchy's password
+// dialog ask for the first admin on the list.
+//
+// Everyone else still has to be approved by a wheel member, as before.
+polkit.addAdminRule(function(action, subject) {
+    if (subject.isInGroup("wheel")) {
+        return ["unix-user:" + subject.user];
+    }
+    return null;
+});
