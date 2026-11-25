@@ -36,11 +36,13 @@ trap 'rm -rf "$work"' EXIT
 file="$work/$name"
 echo "Downloading omarchy-greeter $version"
 curl -fsSL --proto '=https' --max-time 300 -o "$file" "https://github.com/$REPO/releases/download/$tag/$name"
-curl -fsSL --proto '=https' --max-time 60 -o "$file.sig" "https://github.com/$REPO/releases/download/$tag/$name.sig"
+# .sshsig, not .sig: pacman would take a <package>.sig beside the package
+# for a PGP signature and refuse it.
+curl -fsSL --proto '=https' --max-time 60 -o "$work/signature.sshsig" "https://github.com/$REPO/releases/download/$tag/$name.sshsig"
 
 printf '%s\n' "$ALLOWED_SIGNERS" > "$work/allowed_signers"
 ssh-keygen -Y verify -f "$work/allowed_signers" -I omarchy-greeter-release -n omarchy-greeter-release \
-  -s "$file.sig" < "$file" >/dev/null 2>&1 || die "the package signature does not verify; not installing"
+  -s "$work/signature.sshsig" < "$file" >/dev/null 2>&1 || die "the package signature does not verify; not installing"
 info=$(bsdtar -xOf "$file" .PKGINFO)
 [[ $(sed -n 's/^pkgname = //p' <<<"$info") == "omarchy-greeter" && $(sed -n 's/^pkgver = //p' <<<"$info") == "$version" ]] ||
   die "the signed package is not omarchy-greeter $version; not installing"
