@@ -145,15 +145,16 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // Windows: one screen for locking and signing in (lock_to_login in
   // /etc/omarchy-greeter.conf, on unless "no"). This lock stays up
   // underneath, so if the login screen does not come up, this is what shows.
-  // Not for a lock of a session already out of sight, a lock coming back
-  // after a shell restart, or one a logind unlock is about to lift.
+  // Not for a lock of a session already out of sight, the lock a shell
+  // restart puts back (it comes up within the first seconds), or one a
+  // logind unlock is about to lift. A lock you start always opens it.
   readonly property bool lockToLogin: {
     var m = String(greeterSettings.text() || "").match(/^\\s*lock_to_login\\s*=\\s*(\\w*)/m)
     return !m || m[1] !== "no"
   }
   function maybeOpenLogin() {
     if (!root.lockToLogin || !sessionLock.locked || !root.sessionActive) return
-    if (root.justStarted() || root.logindUnlockPending()) return
+    if (Date.now() - root.shellStartedAt < 3000 || root.logindUnlockPending()) return
     openLoginTimer.restart()
   }
   Connections {
