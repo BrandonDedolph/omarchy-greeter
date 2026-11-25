@@ -548,6 +548,7 @@ Rectangle {
         Repeater {
           model: Math.min(password.text.length, 22)
           Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
             width: 9 * root.ui
             height: width
             radius: width / 2
