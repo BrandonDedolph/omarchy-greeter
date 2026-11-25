@@ -126,7 +126,9 @@ PY
   exit 1
 fi
 
-omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+# The lock is a keep-loaded plugin: the built-in stays running (and keeps
+# answering `omarchy system lock`) until the shell restarts.
+omarchy restart shell >/dev/null 2>&1 || omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
 # Re-clone after each `omarchy update` so the lock keeps Omarchy's fixes.
 mkdir -p "${HOOK%/*}"
 install -m 755 /usr/share/omarchy-greeter/hooks/post-update "$HOOK" 2>/dev/null || true
