@@ -312,6 +312,40 @@ rep("LockView.qml", '''  signal wakeRequested()
   }
 ''')
 
+# Tab moves between the password field and the switch buttons; Enter or
+# Space on a button presses it, and typing goes back to the password.
+rep("LockView.qml", '''        activeFocusOnPress: true
+''', '''        activeFocusOnPress: true
+        activeFocusOnTab: true
+''')
+rep("LockView.qml", '''    if (inputEnabled && passwordInput.enabled && !passwordInput.activeFocus) forcePasswordFocus()
+''', '''    if (inputEnabled && passwordInput.enabled && !passwordInput.activeFocus && !switchFocused()) forcePasswordFocus()
+''')
+rep("LockView.qml", '''  function forcePasswordFocus() {
+''', '''  // A switch button has keyboard focus (Tab), so the field must not take it back.
+  function switchFocused() {
+    var item = Window.activeFocusItem
+    return !!item && item.objectName === "omarchyGreeterSwitch" && item.visible && item.enabled
+  }
+
+  function switchKey(event, press) {
+    root.wakeRequested()
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+      if (!event.isAutoRepeat) press()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Escape) {
+      root.forcePasswordFocus()
+      event.accepted = true
+    } else if (event.text.length === 1 && event.text.charCodeAt(0) >= 32 && !(event.modifiers & Qt.ControlModifier)) {
+      root.forcePasswordFocus()
+      root.passwordTextEdited(root.passwordText + event.text)
+      event.accepted = true
+    }
+  }
+
+  function forcePasswordFocus() {
+''')
+
 rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who has never seen it — it
 ''', '''    // Signed in as: avatar and name above the password field.
     Column {
@@ -417,8 +451,11 @@ rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who 
           width: chipText.implicitWidth + 32
           radius: height / 2
           color: Commons.Color.lock.background
-          border.width: 1
-          border.color: chipMouse.containsMouse ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
+          border.width: activeFocus ? 2 : 1
+          border.color: chipMouse.containsMouse || activeFocus ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
+          objectName: "omarchyGreeterSwitch"
+          activeFocusOnTab: true
+          Keys.onPressed: function(event) { root.switchKey(event, function() { root.switchUserRequested(modelData.name) }) }
           Text {
             id: chipText
             anchors.centerIn: parent
@@ -443,8 +480,11 @@ rep("LockView.qml", '''    // The crossed-out icon has no meaning to a user who 
         width: switchText.implicitWidth + 32
         radius: height / 2
         color: Commons.Color.lock.background
-        border.width: 1
-        border.color: switchMouse.containsMouse ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
+        border.width: activeFocus ? 2 : 1
+        border.color: switchMouse.containsMouse || activeFocus ? Commons.Color.lock.borderActive : Commons.Color.lock.placeholder
+        objectName: "omarchyGreeterSwitch"
+        activeFocusOnTab: true
+        Keys.onPressed: function(event) { root.switchKey(event, function() { root.switchUserRequested("") }) }
         Text {
           id: switchText
           anchors.centerIn: parent
