@@ -2,7 +2,7 @@
 # with it from a clean export of the tagged code (and writes aur/PKGBUILD,
 # from a release tarball, for the AUR).
 pkgname=omarchy-greeter
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Multi-user Omarchy login screen that follows each user's background, theme and display scale"
 url="https://github.com/BrandonDedolph/omarchy-greeter"
