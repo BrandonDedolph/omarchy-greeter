@@ -1,0 +1,20 @@
+#!/bin/bash
+# PAM step (pam_exec) at the top of /etc/pam.d/sddm's auth stack. Succeeds
+# exactly once per boot, for a real user, while boot-unlock-mark's mark is
+# present and fresh; otherwise fails, and PAM carries on to the normal
+# password check.
+FLAG=/run/omarchy-greeter/boot-unlocked
+
+[[ ${PAM_TYPE:-} == auth && ${PAM_SERVICE:-} == sddm && -n ${PAM_USER:-} ]] || exit 1
+[[ -f $FLAG && ! -L $FLAG && $(stat -c %u "$FLAG") == 0 ]] || exit 1
+
+uptime=$(cut -d. -f1 /proc/uptime)
+if (( uptime >= 600 )); then rm -f "$FLAG"; exit 1; fi
+
+uid=$(id -u "$PAM_USER" 2>/dev/null) || exit 1
+(( uid >= 1000 && uid < 60000 )) || exit 1
+
+# One login only: whoever claims the mark first.
+rm "$FLAG" 2>/dev/null || exit 1
+logger -t omarchy-greeter "boot unlock: $PAM_USER logged in with the disk password typed at boot"
+exit 0

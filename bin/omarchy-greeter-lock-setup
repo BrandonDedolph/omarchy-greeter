@@ -1,0 +1,133 @@
+#!/bin/bash
+# Make the Omarchy lock screen show only on the primary monitor from
+# /etc/omarchy-greeter.conf; the others go black. Clones the built-in lock
+# plugin (`omarchy plugin clone omarchy.lock`) and patches the clone.
+#
+# The clone is a snapshot, so it would miss Omarchy's later lock fixes. To
+# avoid that, re-running this (the installed post-update hook does it after
+# every `omarchy update`) throws the old clone away and re-clones fresh.
+# If the built-in lock code changed so the patch no longer fits, it stops
+# and leaves you on the built-in lock (form on every monitor) instead.
+#
+#   omarchy-greeter-lock-setup           clone fresh and patch
+#   omarchy-greeter-lock-setup --ensure  set up once, unless already done or opted out
+#   omarchy-greeter-lock-setup --remove  go back to the built-in lock (and opt out)
+
+set -euo pipefail
+
+ID="${USER:-$(id -un)}.lock"
+DIR="$HOME/.config/omarchy/plugins/$ID"
+MARK="omarchy-greeter:primary-lock"
+OPTOUT="$HOME/.config/omarchy-greeter/no-primary-lock"
+HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"
+
+remove_clone() {
+  if [[ -d $DIR ]]; then
+    if ! grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null; then
+      echo "omarchy-greeter-lock-setup: $DIR was not made by this script; leaving it alone" >&2
+      exit 1
+    fi
+    omarchy plugin remove "$ID" --yes >/dev/null
+  fi
+}
+
+if [[ ${1:-} == --remove ]]; then
+  remove_clone
+  rm -f "$HOOK"
+  mkdir -p "${OPTOUT%/*}" && touch "$OPTOUT"
+  echo "Back to the built-in Omarchy lock screen."
+  exit 0
+fi
+
+if [[ ${1:-} == --ensure ]]; then
+  [[ -e $OPTOUT || -d $DIR ]] && exit 0
+fi
+rm -f "$OPTOUT"
+
+remove_clone
+omarchy plugin clone omarchy.lock >/dev/null
+
+if ! python3 -I - "$DIR/Service.qml" "$MARK" <<'PY'; then
+import sys
+path, mark = sys.argv[1], sys.argv[2]
+s = open(path).read()
+
+def rep(old, new):
+    global s
+    if s.count(old) != 1:
+        raise SystemExit(f"anchor not found exactly once: {old.strip()[:60]!r}")
+    s = s.replace(old, new)
+
+# 1. Settings, primary detection and focus helper.
+rep('''  property string pendingPassword: ""
+''', '''  property string pendingPassword: ""
+
+  // ''' + mark + ''': the lock form shows only on the primary monitor
+  // from /etc/omarchy-greeter.conf; the others are black. If that monitor
+  // is not connected, every monitor shows the form.
+  FileView {
+    id: greeterSettings
+    path: "/etc/omarchy-greeter.conf"
+    blockLoading: true
+    printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
+  }
+  readonly property string primaryOutput: {
+    var m = String(greeterSettings.text() || "").match(/^\\s*primary\\s*=\\s*([A-Za-z0-9_.-]*)/m)
+    return m ? m[1] : ""
+  }
+  readonly property bool primaryConnected: {
+    var screens = Quickshell.screens || []
+    for (var i = 0; i < screens.length; i++) if (screens[i] && screens[i].name === primaryOutput) return true
+    return false
+  }
+  function isPrimaryOutput(screen) {
+    return primaryOutput === "" || !primaryConnected || (!!screen && screen.name === primaryOutput)
+  }
+  // Keyboard focus goes to the lock surface on the focused monitor.
+  function focusPrimaryOutput() {
+    if (primaryOutput === "" || !primaryConnected) return
+    Quickshell.execDetached(["hyprctl", "dispatch", 'hl.dsp.focus({ monitor = "' + primaryOutput + '" })'])
+  }
+''')
+
+# 2. Focus the primary monitor just before locking.
+rep('''    pendingSessionLockTimer.stop()
+    sessionLock.locked = true
+''', '''    pendingSessionLockTimer.stop()
+    root.focusPrimaryOutput()
+    sessionLock.locked = true
+''')
+
+# 3. Per-surface: black and invisible off the primary. The invisible form
+#    still takes typing (the password is shared), so keys pressed while
+#    focus sits on a black monitor are not lost.
+rep('''      color: Commons.Color.background
+
+      LockView {
+        id: lockView
+        anchors.fill: parent
+''', '''      color: root.isPrimaryOutput(lockSurface.screen) ? Commons.Color.background : "#000000"
+
+      LockView {
+        id: lockView
+        anchors.fill: parent
+        opacity: root.isPrimaryOutput(lockSurface.screen) ? 1 : 0
+''')
+rep('''        loadBackground: root.locked
+''', '''        loadBackground: root.locked && root.isPrimaryOutput(lockSurface.screen)
+''')
+
+open(path, "w").write(s)
+PY
+  echo "omarchy-greeter-lock-setup: the built-in lock changed and the patch no longer fits; staying on the built-in lock" >&2
+  omarchy plugin remove "$ID" --yes >/dev/null || true
+  exit 1
+fi
+
+omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+# Re-clone after each `omarchy update` so the lock keeps Omarchy's fixes.
+mkdir -p "${HOOK%/*}"
+install -m 755 /usr/share/omarchy-greeter/hooks/post-update "$HOOK" 2>/dev/null || true
+echo "Lock screen now shows on the primary monitor only ($DIR)."

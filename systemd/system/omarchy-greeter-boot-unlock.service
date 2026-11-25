@@ -1,0 +1,11 @@
+[Unit]
+Description=Let the first login after a typed disk password skip the account password
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=exec
+ExecStart=/usr/lib/omarchy-greeter/boot-unlock-mark
+
+[Install]
+WantedBy=multi-user.target

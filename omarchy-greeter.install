@@ -1,20 +1,43 @@
+PAM_FILE=/etc/pam.d/sddm
+PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
+
+add_pam_line() {
+  [[ -f $PAM_FILE ]] || return 0
+  grep -qF 'boot-unlock-auth' "$PAM_FILE" && return 0
+  # Before the first auth line, so it is checked first and falls through to
+  # the normal password check whenever it does not apply.
+  awk -v line="$PAM_LINE" '!done && /^[[:space:]]*-?auth[[:space:]]/ { print line; done=1 } { print }' "$PAM_FILE" > "$PAM_FILE.omarchy-greeter" &&
+    cat "$PAM_FILE.omarchy-greeter" > "$PAM_FILE" && rm -f "$PAM_FILE.omarchy-greeter"
+}
+
+remove_pam_line() {
+  [[ -f $PAM_FILE ]] && sed -i '/omarchy-greeter\/boot-unlock-auth/d' "$PAM_FILE"
+}
+
 post_install() {
   systemctl daemon-reload
   systemctl enable --now omarchy-greeter-dirs.service
+  systemctl enable omarchy-greeter-boot-unlock.service
   systemctl --global enable omarchy-greeter-sync.path omarchy-greeter-sync.service
+  add_pam_line
   echo ">> Each user: log in once (or run 'systemctl --user daemon-reload && systemctl --user enable --now omarchy-greeter-sync.path && omarchy-greeter-sync --now') to publish their look."
 }
 
 post_upgrade() {
   systemctl daemon-reload
+  systemctl enable omarchy-greeter-boot-unlock.service
+  add_pam_line
 }
 
 pre_remove() {
-  systemctl disable --now omarchy-greeter-dirs.service || true
+  remove_pam_line
+  systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
   systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service || true
+  rm -f /run/omarchy-greeter/boot-unlocked
 }
 
 post_remove() {
-  rm -rf /var/lib/omarchy-greeter
+  rm -rf /var/lib/omarchy-greeter /run/omarchy-greeter
   rm -f /var/lib/sddm/omarchy-greeter-selected
+  echo ">> Each user can run 'omarchy plugin remove \$USER.lock --yes' to drop the primary-monitor lock clone."
 }

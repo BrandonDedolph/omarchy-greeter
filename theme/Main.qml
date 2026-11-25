@@ -13,6 +13,45 @@ Rectangle {
   color: "#000000"
 
   readonly property string dataDir: (typeof config !== "undefined" && config.dataDir) ? String(config.dataDir) : "/var/lib/omarchy-greeter"
+  readonly property string settingsFile: (typeof config !== "undefined" && config.settingsFile) ? String(config.settingsFile) : "/etc/omarchy-greeter.conf"
+  readonly property string bootFlag: (typeof config !== "undefined" && config.bootFlag) ? String(config.bootFlag) : "/run/omarchy-greeter/boot-unlocked"
+
+  // ---- primary monitor ---------------------------------------------------
+  //
+  // Only the primary monitor shows the login screen; the others stay black.
+  // If the primary is not connected, every monitor shows it, so a missing
+  // monitor can never leave you without a password field.
+  property string primaryOutput: ""
+  readonly property bool primaryConnected: {
+    var screens = Qt.application.screens
+    for (var i = 0; i < screens.length; i++) if (screens[i].name === primaryOutput) return true
+    return false
+  }
+  readonly property bool showsUi: primaryOutput === "" || !primaryConnected || Screen.name === primaryOutput
+
+  // ---- one password at boot ----------------------------------------------
+  //
+  // Set while the first login after a typed disk password may skip the
+  // account password (see boot-unlock-auth). PAM decides; this only changes
+  // what the field says.
+  property bool bootUnlocked: false
+
+  Timer {
+    interval: 1500
+    running: root.showsUi
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.readText(root.bootFlag, function(text) { root.bootUnlocked = text.trim().length > 0 })
+  }
+
+  Component.onCompleted: {
+    readText(settingsFile, function(text) {
+      var m = text.match(/^\s*primary\s*=\s*(\S*)/m)
+      root.primaryOutput = m ? m[1] : ""
+    })
+    password.forceActiveFocus()
+  }
+
   readonly property string syncFile: (typeof config !== "undefined" && config.syncFile) ? String(config.syncFile) : "/var/lib/sddm/omarchy-greeter-selected"
 
   // ---- sizing (matches the selected user's desktop) ----------------------
@@ -206,7 +245,8 @@ Rectangle {
   }
 
   function login() {
-    if (!userName || authenticating) return
+    if (!userName || authenticating || !showsUi) return
+    if (password.text.length === 0 && !bootUnlocked) return
     authenticating = true
     loginFailed = false
     sddm.login(userName, password.text, sessionIndex)
@@ -242,14 +282,14 @@ Rectangle {
     RevealBackground {
       id: background
       anchors.fill: parent
-      source: root.look && root.look.background ? root.look.background : ""
+      source: root.showsUi && root.look && root.look.background ? root.look.background : ""
       fallbackColor: root.cBackground
       decodeSize: Qt.size(Math.ceil(root.width * Screen.devicePixelRatio), Math.ceil(root.height * Screen.devicePixelRatio))
     }
 
     Loader {
       anchors.fill: parent
-      active: !!(root.look && root.look.video)
+      active: root.showsUi && !!(root.look && root.look.video)
       source: "VideoLayer.qml"
       onLoaded: item.source = Qt.binding(function() { return root.look && root.look.video ? root.look.video : "" })
     }
@@ -426,7 +466,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 22 * root.ui
         anchors.verticalCenter: parent.verticalCenter
-        text: ""
+        text: root.bootUnlocked && !root.loginFailed ? "\uf09c" : "\uf023"
         color: root.loginFailed ? root.cError : root.cMuted
         font.family: root.fontFamily
         font.pixelSize: 18 * root.ui
@@ -437,7 +477,7 @@ Rectangle {
         anchors.leftMargin: 52 * root.ui
         anchors.verticalCenter: parent.verticalCenter
         visible: password.text.length === 0 && !root.authenticating
-        text: root.loginFailed ? "Wrong password, try again" : "Password"
+        text: root.loginFailed ? "Wrong password, try again" : (root.bootUnlocked ? "Unlocked at boot \u00b7 press Enter" : "Password")
         color: root.loginFailed ? root.cError : root.cMuted
         font.family: root.fontFamily
         font.pixelSize: 16 * root.ui
@@ -532,6 +572,7 @@ Rectangle {
         selectedTextColor: "transparent"
         cursorDelegate: Item {}
         readOnly: root.authenticating
+        enabled: root.showsUi
         focus: true
         onTextChanged: if (text.length > 0) root.loginFailed = false
 
@@ -662,5 +703,12 @@ Rectangle {
     }
   }
 
-  Component.onCompleted: password.forceActiveFocus()
+  // Non-primary monitors: plain black over everything, swallowing clicks.
+  Rectangle {
+    anchors.fill: parent
+    color: "#000000"
+    visible: !root.showsUi
+    z: 1000
+    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; hoverEnabled: true }
+  }
 }

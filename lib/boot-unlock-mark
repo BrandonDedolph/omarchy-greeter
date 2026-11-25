@@ -1,0 +1,48 @@
+#!/bin/bash
+# Runs once at boot, before the login screen. Marks that the first login may
+# skip the account password, but only when the disk password was typed on
+# this boot:
+#   - / is on LUKS, so reaching here at all needed the disk unlocked;
+#   - that LUKS volume has no TPM2/FIDO2/other token and the kernel was given
+#     no key file, so a typed passphrase is the only way it could unlock;
+#   - the kernel booted moments ago (rules out a soft-reboot that skipped the
+#     disk password).
+# The mark lives in /run (RAM), is used up by the first login, and is removed
+# 10 minutes after boot. Anything unexpected leaves no mark: you just type
+# your password as usual.
+set -uo pipefail
+
+FLAG_DIR=/run/omarchy-greeter
+FLAG=$FLAG_DIR/boot-unlocked
+WINDOW=600
+
+log() { echo "boot-unlock: $*"; }
+
+rm -f "$FLAG"
+
+conf_value() { sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]#]*).*/\1/p" /etc/omarchy-greeter.conf 2>/dev/null | tail -n1; }
+[[ $(conf_value boot_unlock) == yes ]] || { log "disabled in /etc/omarchy-greeter.conf"; exit 0; }
+
+uptime=$(cut -d. -f1 /proc/uptime)
+(( uptime < 300 )) || { log "not a fresh boot (uptime ${uptime}s)"; exit 0; }
+
+cmdline=$(</proc/cmdline)
+if [[ $cmdline == *cryptkey=* || $cmdline == *rd.luks.key=* ]]; then
+  log "disk unlocks with a key file"; exit 0
+fi
+
+source=$(findmnt -no SOURCE / | sed 's/\[.*//')
+[[ $source == /dev/mapper/* ]] || { log "/ is not on dm-crypt ($source)"; exit 0; }
+device=$(cryptsetup status "$source" 2>/dev/null | awk '$1=="device:"{print $2}')
+[[ -n $device ]] || { log "cannot find the device under $source"; exit 0; }
+cryptsetup isLuks "$device" || { log "$device is not LUKS"; exit 0; }
+tokens=$(cryptsetup luksDump --dump-json-metadata "$device" 2>/dev/null | jq '.tokens | length' 2>/dev/null)
+[[ $tokens == 0 ]] || { log "$device has ${tokens:-unknown} unlock tokens (TPM/FIDO); not treating boot as a typed password"; exit 0; }
+
+install -d -m 755 -o root -g root "$FLAG_DIR"
+echo "$uptime" > "$FLAG.tmp" && chmod 644 "$FLAG.tmp" && mv -f "$FLAG.tmp" "$FLAG"
+log "disk password was typed this boot; first login may skip the account password for $((WINDOW - uptime))s"
+
+# Take the mark away when the window closes, if no one has used it.
+sleep $((WINDOW - uptime))
+rm -f "$FLAG" && log "window closed"

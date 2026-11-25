@@ -111,3 +111,8 @@ done
 [[ -n $video ]] && mv -f "$work/$video" "$DEST/$video"
 
 log "published ${background:-no background} for $USER_NAME"
+
+# First run for this user: put the lock screen on the primary monitor too.
+if [[ -z ${OMARCHY_GREETER_DIR:-} ]] && command -v omarchy-greeter-lock-setup >/dev/null; then
+  omarchy-greeter-lock-setup --ensure || log "lock screen setup failed; will retry next time"
+fi
