@@ -1,0 +1,37 @@
+name: test
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Weekly, so a change in Omarchy's lock screen that breaks the patch
+    # shows up here before users hit it.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm --needed git make bash shellcheck python lua luajit jq \
+            imagemagick ffmpeg openssh util-linux qt6-declarative which
+
+      - uses: actions/checkout@v4
+
+      - name: Omarchy's lock screen (upstream master)
+        run: |
+          git clone --depth 1 https://github.com/omacom/omarchy.git /tmp/omarchy
+          mkdir -p /usr/share/omarchy/shell/plugins
+          cp -r /tmp/omarchy/shell/plugins/lock /usr/share/omarchy/shell/plugins/lock
+
+      - name: Checks and tests (as an ordinary user, like the scripts run)
+        run: |
+          useradd -m tester
+          chown -R tester: "$GITHUB_WORKSPACE"
+          su tester -c "cd '$GITHUB_WORKSPACE' && make check test"
