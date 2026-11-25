@@ -100,6 +100,27 @@ rep("Service.qml", '''  property string pendingPassword: ""
   function isPrimaryOutput(screen) {
     return primaryOutput === "" || !primaryConnected || (!!screen && screen.name === primaryOutput)
   }
+  // Back in front while locked (switched to from another account): put the
+  // keyboard on the primary monitor's password field, so you can type at
+  // once. Hyprland is still restoring the monitors then, so a few tries.
+  signal refocusRequested()
+  property int refocusTries: 0
+  function refocusAfterSwitch() {
+    root.refocusTries = 0
+    refocusTimer.restart()
+    refocusTimer.triggered()
+  }
+  Timer {
+    id: refocusTimer
+    interval: 300
+    repeat: true
+    onTriggered: {
+      if (!root.lockRequested || !root.sessionActive || ++root.refocusTries > 5) { stop(); return }
+      root.focusPrimaryOutput()
+      root.refocusRequested()
+    }
+  }
+
   // Keyboard focus goes to the lock surface on the focused monitor.
   function focusPrimaryOutput() {
     if (primaryOutput === "" || !primaryConnected) return
@@ -184,6 +205,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   function handleSessionEvent(event) {
     if (event === "active") {
       root.sessionActive = true
+      if (root.lockRequested) root.refocusAfterSwitch()
       if (root.lockRequested && root.fingerprintConfigured) {
         root.resumeFingerprint()
         Qt.callLater(root.startFingerprint)
@@ -309,6 +331,10 @@ rep("Service.qml", '''      color: Commons.Color.background
         avatarPath: root.avatarPath
         onSwitchUserRequested: function(name) { root.switchUser(name) }
         onPowerRequested: function(action) { root.requestPower(action) }
+        Connections {
+          target: root
+          function onRefocusRequested() { if (root.isPrimaryOutput(lockSurface.screen)) lockView.forcePasswordFocus() }
+        }
 ''')
 rep("Service.qml", '''        loadBackground: root.locked
 ''', '''        loadBackground: root.locked && root.isPrimaryOutput(lockSurface.screen)

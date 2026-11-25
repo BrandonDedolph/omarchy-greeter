@@ -69,7 +69,9 @@ class PatchLock(unittest.TestCase):
                         self.assertIn(f"  signal {m.group(1)}", shim)
                 # Everything the logic hands the layout (LockView { ... } blocks) is declared.
                 for block in re.findall(r"\n( +)LockView \{\n(.*?)\n\1\}", service, re.S):
-                    for name in re.findall(r"^\s+(?:on([A-Z]\w*)|(\w+))\s*:", block[1], re.M):
+                    # Only the block's own settings, not those of objects inside it.
+                    own = " " * (len(block[0]) + 2)
+                    for name in re.findall(rf"^{own}(?:on([A-Z]\w*)|(\w+))\s*:", block[1], re.M):
                         prop = name[1] or (name[0][0].lower() + name[0][1:])
                         if prop in ("id", "anchors", "opacity"):
                             continue
