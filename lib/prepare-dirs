@@ -1,0 +1,18 @@
+#!/bin/bash
+# Give every human account its own folder under /var/lib/omarchy-greeter,
+# owned by that account and readable by the greeter. Runs at boot, so
+# accounts added later are picked up after a reboot (or a manual start).
+set -euo pipefail
+ROOT=/var/lib/omarchy-greeter
+install -d -m 755 -o root -g root "$ROOT"
+
+read -r uid_min uid_max < <(awk '/^UID_MIN/{a=$2} /^UID_MAX/{b=$2} END{print (a?a:1000), (b?b:60000)}' /etc/login.defs)
+
+getent passwd | while IFS=: read -r name _ uid gid _ home shell; do
+  (( uid >= uid_min && uid <= uid_max )) || continue
+  [[ $shell == */nologin || $shell == */false ]] && continue
+  dir="$ROOT/$name"
+  # Never follow a link someone planted in place of the folder.
+  [[ -L $dir ]] && rm -f "$dir"
+  install -d -m 755 -o "$uid" -g "$gid" "$dir"
+done

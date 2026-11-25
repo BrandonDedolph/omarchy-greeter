@@ -1,0 +1,10 @@
+[Unit]
+Description=Prepare per-user folders for the Omarchy login screen
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/omarchy-greeter/prepare-dirs
+
+[Install]
+WantedBy=multi-user.target

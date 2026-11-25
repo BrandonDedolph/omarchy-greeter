@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch my Omarchy background, theme and sizing for the login screen
+PartOf=graphical-session.target
+
+[Path]
+# theme set, bg next and bg set all repoint files in here
+PathChanged=%h/.local/state/omarchy/current
+PathChanged=%h/.local/state/omarchy/current/theme
+# monitor scale and shell font size
+PathChanged=%h/.config/hypr
+PathChanged=%h/.config/omarchy/shell.toml
+PathChanged=%h/.face
+Unit=omarchy-greeter-sync.service
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish my Omarchy background and theme for the login screen
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-greeter-sync
+
+[Install]
+WantedBy=graphical-session.target

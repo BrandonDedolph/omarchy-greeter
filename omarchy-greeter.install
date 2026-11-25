@@ -1,0 +1,20 @@
+post_install() {
+  systemctl daemon-reload
+  systemctl enable --now omarchy-greeter-dirs.service
+  systemctl --global enable omarchy-greeter-sync.path omarchy-greeter-sync.service
+  echo ">> Each user: log in once (or run 'systemctl --user daemon-reload && systemctl --user enable --now omarchy-greeter-sync.path && omarchy-greeter-sync --now') to publish their look."
+}
+
+post_upgrade() {
+  systemctl daemon-reload
+}
+
+pre_remove() {
+  systemctl disable --now omarchy-greeter-dirs.service || true
+  systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service || true
+}
+
+post_remove() {
+  rm -rf /var/lib/omarchy-greeter
+  rm -f /var/lib/sddm/omarchy-greeter-selected
+}

@@ -1,0 +1,113 @@
+#!/bin/bash
+# Publish this user's current Omarchy look for the login screen.
+#
+# The SDDM greeter runs as the `sddm` user and cannot read anyone's home, so
+# each user copies a screen-sized still of their background, their theme
+# colors and their avatar into /var/lib/omarchy-greeter/<user>/, a folder they
+# own and the greeter can read. A systemd user path unit runs this whenever
+# ~/.local/state/omarchy/current changes (theme set, bg next, bg set).
+
+set -euo pipefail
+
+ROOT=${OMARCHY_GREETER_DIR:-/var/lib/omarchy-greeter}
+USER_NAME=$(id -un)
+DEST="$ROOT/$USER_NAME"
+STATE="$HOME/.local/state/omarchy/current"
+MAX_W=3840
+MAX_H=2160
+MAX_VIDEO_BYTES=$((150 * 1024 * 1024))
+
+log() { echo "omarchy-greeter-sync: $*" >&2; }
+
+if [[ ! -d $DEST || ! -w $DEST ]]; then
+  log "$DEST is missing or not writable; run: sudo systemctl start omarchy-greeter-dirs"
+  exit 0
+fi
+
+# A theme switch rewrites several files in a row; let it settle first.
+[[ ${1:-} == --now ]] || sleep 1.5
+
+work=$(mktemp -d "$DEST/.sync.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+colors="$STATE/theme/colors.toml"
+bgcolor="#1a1b26"
+if [[ -r $colors ]]; then
+  cp "$colors" "$work/colors.toml"
+  value=$(sed -nE 's/^[[:space:]]*background[[:space:]]*=[[:space:]]*"(#[0-9a-fA-F]{6})".*/\1/p' "$colors" | head -n1)
+  [[ -n $value ]] && bgcolor=$value
+fi
+
+[[ -r $STATE/theme.name ]] && cp "$STATE/theme.name" "$work/theme.name"
+
+background=$(readlink -f "$STATE/background" 2>/dev/null || true)
+video=""
+if [[ -n $background && -f $background ]]; then
+  case "${background,,}" in
+    *.mp4|*.webm|*.mkv|*.mov|*.m4v)
+      ext="${background##*.}"
+      ext="${ext,,}"
+      # The still is shown at once and stays as the fallback if video fails.
+      ffmpeg -v error -y -i "$background" -frames:v 1 \
+        -vf "scale='min($MAX_W,iw)':'min($MAX_H,ih)':force_original_aspect_ratio=increase" \
+        -q:v 3 "$work/background.jpg" || true
+      if (( $(stat -c %s "$background") <= MAX_VIDEO_BYTES )); then
+        cp "$background" "$work/background.$ext"
+        video="background.$ext"
+      else
+        log "video larger than $((MAX_VIDEO_BYTES / 1024 / 1024)) MB; using its first frame only"
+      fi
+      ;;
+    *)
+      # First frame only, flattened onto the theme color (some stock
+      # backgrounds are transparent), shrunk to at most 4K.
+      magick "${background}[0]" -background "$bgcolor" -alpha remove -alpha off \
+        -resize "${MAX_W}x${MAX_H}^>" -strip -quality 90 "$work/background.jpg" ||
+        log "could not convert $background"
+      ;;
+  esac
+fi
+
+for face in "$HOME/.face" "$HOME/.face.icon"; do
+  if [[ -r $face ]]; then
+    magick "${face}[0]" -resize '256x256^' -gravity center -extent 256x256 -strip "$work/avatar.png" 2>/dev/null || true
+    break
+  fi
+done
+
+# Sizing, so the login screen matches the desktop: the font and base size the
+# Omarchy shell uses, and each monitor's scale. hyprctl only answers inside a
+# Hyprland session, so a run outside one keeps the last known monitors.
+font_family=$(omarchy-font-current 2>/dev/null || fc-match -f '%{family[0]}' monospace 2>/dev/null || echo monospace)
+font_size=""
+for toml in "$HOME/.config/omarchy/shell.toml" "$STATE/theme/shell.toml"; do
+  [[ -r $toml ]] || continue
+  font_size=$(awk '/^\[/{s=$0} s=="[font]" && $1=="base-size"{gsub(/[^0-9.]/,"",$3); print $3; exit}' "$toml")
+  [[ -n $font_size ]] && break
+done
+monitors=$(hyprctl monitors -j 2>/dev/null | jq -c 'map({(.name): .scale}) | add // {}' 2>/dev/null || true)
+if [[ -z $monitors || $monitors == "{}" ]] && [[ -r $DEST/display.json ]]; then
+  monitors=$(jq -c '.monitors // {}' "$DEST/display.json" 2>/dev/null || echo '{}')
+fi
+jq -n --arg family "$font_family" --arg size "${font_size:-12}" --argjson monitors "${monitors:-{\}}" \
+  '{fontFamily: $family, fontBaseSize: ($size | tonumber), monitors: $monitors}' > "$work/display.json"
+
+printf '%s\n' "$video" > "$work/video"
+date +%s > "$work/updated"
+
+# Move each file into place on its own, so the greeter never sees a half-
+# written image, then drop what this run no longer publishes.
+chmod 644 "$work"/*
+for name in colors.toml theme.name background.jpg avatar.png display.json video updated; do
+  if [[ -e $work/$name ]]; then
+    mv -f "$work/$name" "$DEST/$name"
+  elif [[ $name != video && $name != updated ]]; then
+    rm -f "$DEST/$name"
+  fi
+done
+for old in "$DEST"/background.{mp4,webm,mkv,mov,m4v}; do
+  [[ -e $old && $(basename "$old") != "$video" ]] && rm -f "$old"
+done
+[[ -n $video ]] && mv -f "$work/$video" "$DEST/$video"
+
+log "published ${background:-no background} for $USER_NAME"
