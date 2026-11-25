@@ -33,11 +33,10 @@ It downloads the package, checks its signature against the project's release key
 
 (An AUR package will follow once AUR account registration reopens.)
 
-Then log out once (or reboot). At your next login the package:
+Installing adds **Setup > Login & Lock** to every account's Omarchy menu right away. Then log out once (or reboot). At your next login the package:
 
 - publishes your look for the login screen;
-- switches you to the multi-user lock screen (a one-time desktop reload);
-- adds **Setup > Login & Lock** to your Omarchy menu.
+- switches you to the multi-user lock screen.
 
 Every other account gets the same at its own first login. The login screen reads every account's look at boot, so an account shows its own theme even when it is not signed in (a brand-new account shows the default look until its first login).
 

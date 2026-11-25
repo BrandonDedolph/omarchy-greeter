@@ -45,6 +45,10 @@ post_install() {
   add_pam_line
   # Publish and check every account's look now, not just at next boot.
   systemctl start omarchy-greeter-dirs.service || true
+  # The menu entries and update hook are plain files: add them now, as each
+  # account (the lock screen waits for the next login, which loads it).
+  for_each_account /usr/bin/omarchy-greeter menu ensure
+  for_each_account /usr/bin/omarchy-greeter hook
   echo ">> Log out (or reboot) to see the new login screen. Settings: Setup > Login & Lock in the Omarchy menu, or omarchy-greeter status."
 }
 
@@ -53,6 +57,8 @@ post_upgrade() {
   systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
   systemctl restart omarchy-greeter-dirs.service || true
+  for_each_account /usr/bin/omarchy-greeter menu ensure
+  for_each_account /usr/bin/omarchy-greeter hook
   if grep -qE '^[[:space:]]*boot_unlock[[:space:]]*=[[:space:]]*yes' /etc/omarchy-greeter.conf 2>/dev/null; then
     echo ">> One password at boot now names the accounts that may use it. Turn it back on for yours with: omarchy-greeter boot-pass on"
   fi
