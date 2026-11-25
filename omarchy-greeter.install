@@ -44,7 +44,7 @@ post_install() {
   systemctl enable "${SYSTEM_UNITS[@]}"
   systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
-  systemctl start omarchy-greeter-sessions.path || true
+  systemctl start omarchy-greeter-sessions.path omarchy-greeter-sessions.service || true
   # Publish and check every account's look now, not just at next boot.
   systemctl start omarchy-greeter-dirs.service || true
   # The menu entries and update hook are plain files: add them now, as each
@@ -60,7 +60,7 @@ post_upgrade() {
   rm -f /etc/systemd/user/graphical-session.target.wants/omarchy-greeter-presence.service
   systemctl daemon-reload
   systemctl enable omarchy-greeter-sessions.path
-  systemctl start omarchy-greeter-sessions.path || true
+  systemctl start omarchy-greeter-sessions.path omarchy-greeter-sessions.service || true
   systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
   systemctl restart omarchy-greeter-dirs.service || true
