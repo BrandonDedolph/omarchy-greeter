@@ -1,0 +1,6 @@
+[Unit]
+Description=Watch %i's published look for the login screen
+
+[Path]
+PathChanged=/var/lib/omarchy-greeter/%i
+Unit=omarchy-greeter-view@%i.service

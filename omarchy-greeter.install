@@ -1,58 +1,73 @@
 PAM_FILE=/etc/pam.d/sddm
 PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
+USER_UNITS='omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service'
 
 add_pam_line() {
   [[ -f $PAM_FILE ]] || return 0
   grep -qF 'boot-unlock-auth' "$PAM_FILE" && return 0
   # Before the first auth line, so it is checked first and falls through to
-  # the normal password check whenever it does not apply.
-  awk -v line="$PAM_LINE" '!done && /^[[:space:]]*-?auth[[:space:]]/ { print line; done=1 } { print }' "$PAM_FILE" > "$PAM_FILE.omarchy-greeter" &&
-    cat "$PAM_FILE.omarchy-greeter" > "$PAM_FILE" && rm -f "$PAM_FILE.omarchy-greeter"
+  # the normal password check whenever it does not apply. Built outside
+  # /etc/pam.d and swapped in whole.
+  local tmp
+  tmp=$(mktemp) || return 0
+  if awk -v line="$PAM_LINE" '!done && /^[[:space:]]*-?auth[[:space:]]/ { print line; done=1 } { print }' "$PAM_FILE" > "$tmp" &&
+    grep -qF 'boot-unlock-auth' "$tmp"; then
+    install -m 644 -o root -g root "$tmp" "$PAM_FILE"
+  fi
+  rm -f "$tmp"
 }
 
 remove_pam_line() {
   [[ -f $PAM_FILE ]] && sed -i '/omarchy-greeter\/boot-unlock-auth/d' "$PAM_FILE"
 }
 
+# Run a command as every account with a home folder (never as root in
+# someone's home, where a planted link could redirect it).
+for_each_account() {
+  local user home
+  while IFS=: read -r user _ uid _ _ home _; do
+    (( uid >= 1000 && uid < 60000 )) && [[ -d $home ]] || continue
+    runuser -u "$user" -- env HOME="$home" USER="$user" "$@" >/dev/null 2>&1 < /dev/null || true
+  done < <(getent passwd)
+}
+
 post_install() {
   systemctl daemon-reload
-  systemctl enable --now omarchy-greeter-dirs.service
-  systemctl enable omarchy-greeter-boot-unlock.service
-  systemctl --global enable omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service
+  systemctl enable omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service
+  systemctl --global enable $USER_UNITS
   add_pam_line
-  echo ">> Each user: log in once (or run 'systemctl --user daemon-reload && systemctl --user enable --now omarchy-greeter-sync.path && omarchy-greeter-sync --now') to publish their look."
+  # Publish and check every account's look now, not just at next boot.
+  systemctl start omarchy-greeter-dirs.service || true
+  echo ">> Log out (or reboot) to see the new login screen. Settings: Setup > Login & Lock in the Omarchy menu, or omarchy-greeter status."
 }
 
 post_upgrade() {
   systemctl daemon-reload
-  systemctl enable omarchy-greeter-boot-unlock.service
-  systemctl --global enable omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service
+  systemctl --global enable $USER_UNITS
   add_pam_line
-  # Publish every account's look and sizing now, not just at next boot.
   systemctl restart omarchy-greeter-dirs.service || true
+  if grep -qE '^[[:space:]]*boot_unlock[[:space:]]*=[[:space:]]*yes' /etc/omarchy-greeter.conf 2>/dev/null; then
+    echo ">> One password at boot now names the accounts that may use it. Turn it back on for yours with: omarchy-greeter boot-pass on"
+  fi
 }
 
 pre_remove() {
-  # Take the Setup > Login & Lock rows out of every account's Omarchy menu.
-  local home user
-  while IFS=: read -r user _ _ _ _ home _; do
-    [[ -f $home/.config/omarchy/extensions/omarchy-menu.jsonc ]] || continue
-    runuser -u "$user" -- env HOME="$home" /usr/bin/omarchy-greeter menu remove >/dev/null 2>&1 || true
-  done < <(getent passwd)
-  # Put Omarchy's own lock screen back for every account.
-  while IFS=: read -r user _ _ _ _ home _; do
-    [[ -d $home/.config/omarchy/plugins/$user.lock ]] || continue
-    runuser -u "$user" -- env HOME="$home" USER="$user" /usr/bin/omarchy-greeter-lock-setup --uninstall >/dev/null 2>&1 || true
-  done < <(getent passwd)
-  echo "omarchy-greeter: log out and back in to finish switching back to Omarchy's lock screen."
+  # Take the Setup > Login & Lock rows out of every account's Omarchy menu,
+  # the update hook, and put Omarchy's own lock screen back.
+  for_each_account /usr/bin/omarchy-greeter menu purge
+  for_each_account sh -c 'rm -f "$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter" "$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"'
+  for_each_account /usr/bin/omarchy-greeter-lock-setup --uninstall
   remove_pam_line
+  local units
+  units=$(systemctl list-units --plain --no-legend --all 'omarchy-greeter-view@*' 2>/dev/null | awk '{print $1}')
+  systemctl stop $units 2>/dev/null || true
   systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
-  systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service || true
+  systemctl --global disable $USER_UNITS || true
   rm -f /run/omarchy-greeter/boot-unlocked
 }
 
 post_remove() {
   rm -rf /var/lib/omarchy-greeter /run/omarchy-greeter
   rm -f /var/lib/sddm/omarchy-greeter-selected
-  echo ">> Each user can run 'omarchy plugin remove \$USER.lock --yes' to drop the primary-monitor lock clone."
+  echo ">> Log out and back in so a running desktop switches back to Omarchy's lock screen."
 }

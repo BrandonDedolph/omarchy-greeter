@@ -142,6 +142,13 @@ rep("Service.qml", '''  property string pendingPassword: ""
   property real pendingLogindUnlockAt: 0
   readonly property real shellStartedAt: Date.now()
 
+  function justStarted() { return Date.now() - root.shellStartedAt < root.logindUnlockWindowMs }
+
+  function forgetLogindUnlock() {
+    root.pendingLogindUnlockAt = 0
+    Quickshell.execDetached(["sh", "-c", 'rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-greeter-unlock"'])
+  }
+
   function logindUnlockPending() {
     return root.pendingLogindUnlockAt > 0 && Date.now() - root.pendingLogindUnlockAt < root.logindUnlockWindowMs
   }
@@ -172,6 +179,9 @@ rep("Service.qml", '''  property string pendingPassword: ""
         root.beginLock()
       }
     } else if (event === "unlock") {
+      // Only for a lock that is up (or coming back right after a shell
+      // restart); an unlock sent while unlocked must not open a later lock.
+      if (!root.lockRequested && !root.currentlyLocked() && !root.justStarted()) return
       root.pendingLogindUnlockAt = Date.now()
       if (root.sessionActive) logindUnlockTimer.restart()
     }
@@ -202,12 +212,11 @@ rep("Service.qml", '''  property string pendingPassword: ""
     onTriggered: {
       if (!root.logindUnlockPending() || !root.sessionActive) return
       if (!root.lockRequested && !root.currentlyLocked()) {
-        if (Date.now() - root.shellStartedAt < root.logindUnlockWindowMs) restart()
+        if (root.justStarted()) restart()
         return
       }
-      root.pendingLogindUnlockAt = 0
       // Used up: a later shell restart must not replay it.
-      Quickshell.execDetached(["sh", "-c", 'rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-greeter-unlock"'])
+      root.forgetLogindUnlock()
       root.logEvent("logind-unlock")
       root.finishUnlock()
     }
@@ -218,8 +227,13 @@ rep("Service.qml", '''  property string pendingPassword: ""
   readonly property bool lockedForHint: root.lockRequested || root.currentlyLocked()
   onLockedForHintChanged: Quickshell.execDetached(["busctl", "--system", "call", "org.freedesktop.login1",
     "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session", "SetLockedHint", "b", root.lockedForHint ? "true" : "false"])
-  // A password unlock clears any logind unlock still waiting.
-  onLockRequestedChanged: if (!root.lockRequested) root.pendingLogindUnlockAt = 0
+  // A password unlock clears any logind unlock still waiting, and so does a
+  // new lock (except the lock coming back after a shell restart, which the
+  // replayed unlock is for).
+  onLockRequestedChanged: {
+    if (!root.lockRequested) root.pendingLogindUnlockAt = 0
+    else if (!root.justStarted()) root.forgetLogindUnlock()
+  }
 
   Process {
     id: sessionWatch

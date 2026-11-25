@@ -2,12 +2,12 @@
 
 A multi-user login screen and lock screen for [Omarchy](https://omarchy.org). For computers that more than one person uses, or one person with separate accounts (work and personal, say).
 
-- **Each account looks like its own desktop.** The login screen shows the selected account's Omarchy background (video included) and colors itself from that account's theme. Switching accounts wipes to the next background with the same reveal the desktop uses.
+- **Each account looks like its own desktop.** The login screen shows the selected account's Omarchy background (video too, if you allow it) and colors itself from that account's theme. Switching accounts wipes to the next background with the same reveal the desktop uses.
 - **Sized like the desktop.** Each account's monitor scale and Omarchy font size carry over to the login screen.
 - **Knows who is signed in.** Accounts with a session running read **Locked · resumes session**; the rest read **Log in**.
 - **Multi-user lock screen.** The lock shows who it belongs to, who else is signed in, and **Switch user**, which opens the login screen while your session stays locked. Coming back takes one password.
 - **One monitor.** Optionally show the login and lock forms on one monitor only and keep the rest black.
-- **One password at boot.** On an encrypted disk, the disk password can also log you in once, so you type one password instead of two (see [security](#one-password-at-boot)).
+- **One password at boot (optional).** On an encrypted disk, the disk password can also log you in once, so you type one password instead of two (see [security](#one-password-at-boot)).
 - **Settings in the Omarchy menu**, under **Setup > Login & Lock**, plus an `omarchy-greeter` command for the same and for managing accounts.
 
 | Tokyo Night account | Catppuccin Latte account, signed in | Gruvbox account |
@@ -23,13 +23,15 @@ A multi-user login screen and lock screen for [Omarchy](https://omarchy.org). Fo
 
 ## Install
 
-From the [AUR](https://aur.archlinux.org/packages/omarchy-greeter):
+From the latest [release](https://github.com/BrandonDedolph/omarchy-greeter/releases/latest):
 
 ```bash
-omarchy pkg aur add omarchy-greeter
+curl -fsSL https://github.com/BrandonDedolph/omarchy-greeter/releases/latest/download/install.sh | bash
 ```
 
-(or `yay -S omarchy-greeter`). To build from source instead: `git clone https://github.com/BrandonDedolph/omarchy-greeter.git && cd omarchy-greeter && makepkg -si`.
+It downloads the package, checks its signature against the project's release key, and installs it with `pacman` (it asks for your password). Nothing is installed if the signature does not match. You can read [the script](scripts/install.sh) first, or build from source instead: `git clone https://github.com/BrandonDedolph/omarchy-greeter.git && cd omarchy-greeter && makepkg -si`.
+
+(An AUR package will follow once AUR account registration reopens.)
 
 Then log out once (or reboot). At your next login the package:
 
@@ -43,9 +45,15 @@ To pick the monitor for the login and lock forms, open **Setup > Login & Lock > 
 
 ## Updates
 
-Installed from the AUR, omarchy-greeter updates along with everything else when you run `omarchy update` (or `yay`). To see whether an update is waiting: `yay -Qua`. Releases and their notes are on the [releases page](https://github.com/BrandonDedolph/omarchy-greeter/releases).
+omarchy-greeter updates itself when you run `omarchy update`: at the end, Omarchy runs omarchy-greeter's update hook, which installs a newer release if there is one. Every release is signed, and the update is installed only if its signature matches the release key the installed version ships with. Releases and their notes are on the [releases page](https://github.com/BrandonDedolph/omarchy-greeter/releases).
 
-An update takes effect at your next login; it never reloads your desktop in the middle of your work.
+```bash
+omarchy-greeter update --check     # is there a newer release?
+omarchy-greeter update             # install it now
+omarchy-greeter auto-update off    # leave updates to you
+```
+
+An update takes effect at your next login. The one exception is when Omarchy itself changed its lock screen in the same update: then the multi-user lock is rebuilt right away, while `omarchy update` is restarting the desktop anyway.
 
 ## Adding another person
 
@@ -76,9 +84,11 @@ Every feature can be switched on or off. Machine-wide settings ask for an admin 
 | Setting | Menu (Setup > Login & Lock) | Command | Scope | Default |
 |---|---|---|---|---|
 | Monitor for the login and lock forms | Monitor | `omarchy-greeter monitor [focused\|all\|<name>]` | machine | all monitors |
-| One password at boot | Boot Login | `omarchy-greeter boot-pass [on\|off]` | machine | on |
+| One password at boot, for your account | Boot Login | `omarchy-greeter boot-pass [on\|off] [account]` | machine | off |
+| Video backgrounds on the login screen | Video Login | `omarchy-greeter video [on\|off]` | machine | off |
 | Multi-user lock screen | User Lock | `omarchy-greeter lock [on\|off]` | you | on |
 | Your look on the login screen | My Look | `omarchy-greeter publish [on\|off]` | you | on |
+| Updates with `omarchy update` | | `omarchy-greeter auto-update [on\|off]` | you | on |
 | The menu entries | (remove them) | `omarchy-greeter menu [install\|remove]` | you | on |
 
 `omarchy-greeter status` shows them all. The machine-wide settings live in `/etc/omarchy-greeter.conf`.
@@ -91,21 +101,27 @@ With **My Look** off, the login screen shows the default look for your account. 
 sudo pacman -R omarchy-greeter
 ```
 
-This puts back Omarchy's login screen and, for every account, Omarchy's lock screen. It also removes the menu entries and the PAM line, and deletes the published looks in `/var/lib/omarchy-greeter`. Log out and back in afterwards so a running desktop switches to Omarchy's lock. If the login screen ever fails to come up, switch to a text console (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F3</kbd>), log in, and run the same command.
+This puts back Omarchy's login screen and, for every account, Omarchy's lock screen. It also removes the menu entries, the update hook and the PAM line, and deletes the published looks in `/var/lib/omarchy-greeter`. Log out and back in afterwards so a running desktop switches to Omarchy's lock. If the login screen ever fails to come up, switch to a text console (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F3</kbd>), log in, and run the same command.
 
 ## One password at boot
 
-With Omarchy's full-disk encryption you type the disk password at boot and then an account password. With this on, a disk password typed at boot also lets the **first** login skip the account password:
+With Omarchy's full-disk encryption you type the disk password at boot and then an account password. With this on for your account, a disk password typed at boot also lets the **first** login skip the account password:
 
-- only if `/` is on LUKS with no TPM or FIDO2 token and no key file (on the kernel command line, in `/etc/crypttab.initramfs` or bundled into the initramfs), so a typed passphrase was the only way the disk could have opened;
+- only for the accounts an admin turned it on for (`omarchy-greeter boot-pass on` turns it on for yours). Anyone who knows the disk password can use it, so on a shared computer turn it on only for the account of whoever owns the disk password;
+- only if `/` is on LUKS with no TPM or FIDO2 token and no key file (on the kernel command line, in `/etc/crypttab.initramfs`, in `/etc/cryptsetup-keys.d` or bundled into the initramfs), so a typed passphrase was the only way the disk could have opened;
+- only if SDDM does not log anyone in automatically;
+- only for an account that could also log in with its password (not locked, a real login shell);
 - only for a fresh boot (not a soft-reboot), once, and within 10 minutes of boot;
 - only to **start** an account that is not signed in. Returning to a signed-in (locked) session always takes that account's password.
 
-Every use is logged to the journal (`journalctl -t omarchy-greeter`). This is the same trust Omarchy's own encrypted-disk autologin places in the disk password, narrowed to one login and letting you pick the account. If anything about the disk setup does not match, it stays off silently and you type your password as usual. Turn it off with `omarchy-greeter boot-pass off`.
+Every use is logged to the journal (`journalctl -t omarchy-greeter`). This is the same trust Omarchy's own encrypted-disk autologin places in the disk password, narrowed to one login and letting you pick the account. If anything about the disk setup does not match, it stays off and you type your password as usual; `omarchy-greeter status` says why. Turn it off with `omarchy-greeter boot-pass off`.
+
+It works by adding one line to the top of `/etc/pam.d/sddm` (`pam_exec` of `/usr/lib/omarchy-greeter/boot-unlock-auth`), which the package adds on install and removes on removal. The line does nothing unless the conditions above hold.
 
 ## How it works
 
-- **The login screen** is an SDDM theme (`theme/`). SDDM runs it as the `sddm` user, who cannot read home folders. So each account publishes its look (a screen-sized still of its background, theme colors, font size, monitor layout, avatar from `~/.face`) to `/var/lib/omarchy-greeter/<account>/`. This happens from a systemd user unit whenever the theme, background, monitors or font change, and at boot for every account (`omarchy-greeter-sync`).
+- **The login screen** is an SDDM theme (`theme/`). SDDM runs it as the `sddm` user, who cannot read home folders. So each account publishes its look (a screen-sized still of its background, theme colors, font size, monitor layout, avatar from `~/.face`) to its own private folder, `/var/lib/omarchy-greeter/<account>/`. This happens from a systemd user unit whenever the theme, background, monitors or font change, and at boot for every account (`omarchy-greeter-sync`).
+- **The login screen never reads what an account wrote.** The login screen receives every password, so a root service (`publish-view`) checks each published file (only regular files of a capped size, text matched against what is expected, display sizes parsed and rebuilt), re-encodes images as an unprivileged user, and copies the result into `/var/lib/omarchy-greeter/.view/`, readable only by the login screen. One account cannot freeze, crash or read files through the login screen another account uses.
 - **The login screen's compositor** uses the same monitor modes as the desktop and stays in SDR, so moving between them causes no monitor blackout.
 - **The lock screen** is Omarchy's own lock plugin, cloned into `~/.config/omarchy/plugins/<account>.lock` and patched (`lib/patch-lock.py`). The clone is rebuilt from Omarchy's current lock before the desktop starts whenever Omarchy's lock or the patch changes, so Omarchy's lock fixes keep arriving. If an Omarchy update ever changes the lock so much that the patch no longer fits, you get Omarchy's own lock and a notification. Nothing breaks.
 - **A session out of sight is always locked.** If another account or the login screen comes to the front while a session is unlocked, that session locks itself (`omarchy-greeter-guard`, which works with either lock screen).
@@ -122,7 +138,7 @@ QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
 
 `make check` runs the syntax checks.
 
-To release a version (maintainers): `scripts/release 3.1.0`. It checks the tree, tags `v3.1.0`, creates the GitHub release, builds and test-installs the AUR package from that release, and pushes it to the AUR, after which users get it through `omarchy update`.
+To release a version (maintainers): `scripts/release 3.1.0`. It checks the tree, builds the package from a clean export, signs it with the release key (an SSH key, `keys/allowed_signers`), tags `v3.1.0` and creates the GitHub release with the package, its signature and `install.sh`. Installed copies pick it up at their next `omarchy update`.
 
 For screenshots without real account names, add `demoUsers=alex:Alex Rivera,sam:Sam Chen` (and optionally `demoHost=`) to a copy of `theme.conf`, with `dataDir=` pointing at sample looks.
 

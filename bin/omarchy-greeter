@@ -6,7 +6,9 @@
 #
 # Machine-wide (asks for an admin password):
 #   omarchy-greeter monitor [focused|all|<name>]  which monitor shows the login and lock forms
-#   omarchy-greeter boot-pass [on|off|toggle]   disk password at boot also logs you in once
+#   omarchy-greeter boot-pass [on|off|toggle] [account]
+#                                               disk password at boot also logs this account in once
+#   omarchy-greeter video [on|off]              allow video backgrounds on the login screen
 #
 # Your own account:
 #   omarchy-greeter lock [on|off|toggle]        the multi-user lock screen (who is signed in, switch user)
@@ -16,6 +18,10 @@
 #   omarchy-greeter user list
 #   omarchy-greeter user add [name]             create an account (asks the rest)
 #   omarchy-greeter user admin <name> [on|off]  allow or stop admin rights (sudo, system dialogs)
+#
+# Updates (signed releases from GitHub):
+#   omarchy-greeter update [--check]            install a newer release, or only report one
+#   omarchy-greeter auto-update [on|off|toggle] update during `omarchy update` (default on)
 #
 # The Omarchy menu:
 #   omarchy-greeter menu [install|remove]       Setup > Login & Lock in the Omarchy menu
@@ -30,6 +36,10 @@ USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter"
 NO_PUBLISH="$USER_CONF/no-publish"
 NO_LOCK="$USER_CONF/no-primary-lock"
 SELF=/usr/bin/omarchy-greeter
+NO_AUTO_UPDATE="$USER_CONF/no-auto-update"
+REPO=BrandonDedolph/omarchy-greeter
+SIGNERS=/usr/share/omarchy-greeter/allowed_signers
+HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter"
 
 die() { echo "omarchy-greeter: $*" >&2; exit 1; }
 notify() { notify-send -a "Login & Lock" "$@" 2>/dev/null || true; }
@@ -57,7 +67,8 @@ root_set() {  # root_set <key> <value>, only the known keys and values
   local key=$1 value=$2
   case $key in
     primary) [[ $value =~ ^[A-Za-z0-9_.-]*$ ]] || die "not a monitor name: $value" ;;
-    boot_unlock) [[ $value == "yes" || $value == "no" ]] || die "boot_unlock is yes or no" ;;
+    boot_unlock) [[ $value == "no" || $value =~ ^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$ ]] || die "boot_unlock is no or a list of accounts" ;;
+    video) [[ $value == "yes" || $value == "no" ]] || die "video is yes or no" ;;
     *) die "unknown setting: $key" ;;
   esac
   [[ -f $CONF && ! -L $CONF ]] || install -m 644 /dev/null "$CONF"
@@ -79,7 +90,7 @@ cmd_monitor() {
   case $want in
     all) want="" ;;
     focused)
-      want=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name' | head -n1)
+      want=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name' 2>/dev/null | head -n1 || true)
       [[ -n $want ]] || die "no focused monitor (run this inside the desktop)"
       ;;
   esac
@@ -93,14 +104,54 @@ cmd_monitor() {
   fi
 }
 
+# boot_unlock= in the machine config: "no" or the accounts allowed to use it.
+boot_pass_accounts() {
+  local value
+  value=$(conf_get boot_unlock)
+  [[ $value == "no" || $value == "yes" ]] && value=""
+  printf '%s' "$value"
+}
+
 cmd_boot_pass() {
-  case ${1:-} in
-    "") [[ $(conf_get boot_unlock) == "yes" ]] && echo on || echo off ;;
-    on) as_root _set boot_unlock yes; notify "One password at boot" "On: after the disk password, the first login skips the account password." ;;
-    off) as_root _set boot_unlock no; notify "One password at boot" "Off: the login screen always asks for the account password." ;;
-    toggle) if [[ $(cmd_boot_pass) == "on" ]]; then cmd_boot_pass off; else cmd_boot_pass on; fi ;;
-    *) die "usage: omarchy-greeter boot-pass [on|off|toggle]" ;;
+  local mode=${1:-} account=${2:-$(id -un)} list new=() a
+  list=$(boot_pass_accounts)
+  case $mode in
+    "") [[ ",$list," == *",$account,"* ]] && echo on || echo off ;;
+    on|off)
+      [[ $account =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && getent passwd "$account" >/dev/null || die "no account named $account"
+      IFS=, read -r -a current <<<"$list"
+      for a in "${current[@]}"; do [[ -n $a && $a != "$account" ]] && new+=("$a"); done
+      [[ $mode == on ]] && new+=("$account")
+      list=$(IFS=,; printf '%s' "${new[*]}")
+      as_root _set boot_unlock "${list:-no}"
+      if [[ $mode == on ]]; then
+        notify "One password at boot" "On for $account: after the disk password, its first login skips the account password."
+        echo "One password at boot is on for $account (takes effect at the next boot)."
+      else
+        notify "One password at boot" "Off for $account: the login screen always asks for its password."
+        echo "One password at boot is off for $account."
+      fi
+      ;;
+    toggle) if [[ $(cmd_boot_pass "" "$account") == "on" ]]; then cmd_boot_pass off "$account"; else cmd_boot_pass on "$account"; fi ;;
+    *) die "usage: omarchy-greeter boot-pass [on|off|toggle] [account]" ;;
   esac
+}
+
+cmd_video() {
+  case ${1:-} in
+    "") [[ $(conf_get video) == "yes" ]] && echo on || echo off ;;
+    on) as_root _set video yes; echo "Video backgrounds are allowed on the login screen." ;;
+    off) as_root _set video no; echo "The login screen shows a still of video backgrounds." ;;
+    toggle) if [[ $(cmd_video) == "on" ]]; then cmd_video off; else cmd_video on; fi ;;
+    *) die "usage: omarchy-greeter video [on|off|toggle]" ;;
+  esac
+  # Re-check every look now, so the change shows at the next login screen.
+  [[ -n ${1:-} ]] && as_root _refresh-views || true
+}
+
+root_refresh_views() {
+  (( EUID == 0 )) || die "must run as root"
+  systemctl restart omarchy-greeter-dirs.service
 }
 
 # ---- per-account settings -----------------------------------------------
@@ -236,6 +287,7 @@ menu_entries() {
   "setup.greeter.monitor.all": {"icon":"󰍺","label":"All","checked":"[[ \$(omarchy-greeter monitor) == all ]]","action":"omarchy-greeter monitor all"},
   "setup.greeter.boot-pass": {"icon":"󰌾","label":"Boot Login","description":"disk password login","checked":"[[ \$(omarchy-greeter boot-pass) == on ]]","action":"omarchy-greeter boot-pass toggle"},
   "setup.greeter.lock": {"icon":"󰷛","label":"User Lock","description":"switch user signed in","checked":"[[ \$(omarchy-greeter lock) == on ]]","action":"omarchy-greeter lock toggle"},
+  "setup.greeter.video": {"icon":"󰕧","label":"Video Login","description":"video backgrounds","checked":"[[ \$(omarchy-greeter video) == on ]]","action":"omarchy-greeter video toggle"},
   "setup.greeter.publish": {"icon":"󰸉","label":"My Look","description":"theme background","checked":"[[ \$(omarchy-greeter publish) == on ]]","action":"omarchy-greeter publish toggle"},
   "setup.greeter.users": {"icon":"󰀄","label":"Accounts"},
   "setup.greeter.users.add": {"icon":"󰀔","label":"Add","action":"$term 'omarchy-greeter user add'"},
@@ -251,6 +303,7 @@ cmd_menu() {
   case $mode in
     install) rm -f "$NO_MENU" ;;
     remove) mkdir -p "$USER_CONF" && touch "$NO_MENU" ;;
+    purge) mode=remove ;;  # on package removal: take them out, remember nothing
     ensure)
       # At login: add or refresh the entries, unless this user removed them.
       [[ -e $NO_MENU ]] && return 0
@@ -263,6 +316,8 @@ cmd_menu() {
   esac
   mkdir -p "${MENU_FILE%/*}"
   [[ -f $MENU_FILE ]] || printf '{\n}\n' > "$MENU_FILE"
+  # An empty object on one line has no line to insert after.
+  [[ $(tr -d '[:space:]' < "$MENU_FILE") == "{}" ]] && printf '{\n}\n' > "$MENU_FILE"
   tmp=$(mktemp "$MENU_FILE.XXXXXX")
   # Drop the old block, then (for install) put the new one right after the
   # opening brace: every entry ends with a comma, which JSONC allows before
@@ -291,11 +346,125 @@ cmd_user_manage() {
   fi
 }
 
+# ---- updates ------------------------------------------------------------
+# Releases are GitHub releases with the built package and an SSH signature
+# made with the project's release key. A package is installed only if its
+# signature verifies against the key this installed version ships
+# ($SIGNERS), it really is omarchy-greeter, and it is newer than what is
+# installed (no downgrades).
+
+cmd_update() {
+  local check=0
+  case ${1:-} in
+    "") ;;
+    --check) check=1 ;;
+    *) die "usage: omarchy-greeter update [--check]" ;;
+  esac
+  local installed json name pkg_url sig_url latest work file info pkgname pkgver
+  installed=$(pacman -Q omarchy-greeter 2>/dev/null | awk '{print $2}')
+  [[ -n $installed ]] || die "omarchy-greeter is not installed as a package"
+
+  local status
+  json=$(curl -sSL --proto '=https' --max-time 20 -H "Accept: application/vnd.github+json" \
+    -w '\n%{http_code}' "https://api.github.com/repos/$REPO/releases/latest") || die "could not reach GitHub to check for updates"
+  status=${json##*$'\n'}
+  json=${json%$'\n'*}
+  if [[ $status == "404" ]]; then
+    echo "No releases published yet."
+    return 0
+  fi
+  [[ $status == "200" ]] || die "GitHub answered $status while checking for updates"
+  name=$(jq -r '[.assets[].name | select(test("^omarchy-greeter-[0-9][0-9.]*-[0-9]+-any\\.pkg\\.tar\\.zst$"))][0] // empty' <<<"$json")
+  [[ -n $name ]] || die "the latest release has no package"
+  latest=${name#omarchy-greeter-}
+  latest=${latest%-any.pkg.tar.zst}
+  if (( $(vercmp "$latest" "$installed") <= 0 )); then
+    echo "omarchy-greeter $installed is up to date."
+    return 0
+  fi
+  if (( check )); then
+    echo "omarchy-greeter $latest is available (installed: $installed)."
+    return 0
+  fi
+
+  pkg_url="https://github.com/$REPO/releases/download/$(jq -r .tag_name <<<"$json")/$name"
+  [[ $pkg_url =~ ^https://github\.com/$REPO/releases/download/v[0-9.]+/omarchy-greeter-[0-9.]+-[0-9]+-any\.pkg\.tar\.zst$ ]] ||
+    die "unexpected release layout; not updating"
+  sig_url="$pkg_url.sig"
+
+  echo "Updating omarchy-greeter $installed -> $latest"
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  file="$work/$name"
+  curl -fsSL --proto '=https' --max-time 300 -o "$file" "$pkg_url" || die "download failed"
+  curl -fsSL --proto '=https' --max-time 60 -o "$file.sig" "$sig_url" || die "signature download failed"
+  ssh-keygen -Y verify -f "$SIGNERS" -I omarchy-greeter-release -n omarchy-greeter-release \
+    -s "$file.sig" < "$file" >/dev/null 2>&1 || die "the release signature does not verify; not installing"
+  info=$(bsdtar -xOf "$file" .PKGINFO) || die "not a package"
+  pkgname=$(sed -n 's/^pkgname = //p' <<<"$info")
+  pkgver=$(sed -n 's/^pkgver = //p' <<<"$info")
+  [[ $pkgname == "omarchy-greeter" && $pkgver == "$latest" ]] || die "the signed package is not omarchy-greeter $latest; not installing"
+
+  # The checks above are for clear messages; the root step repeats them on
+  # its own copy, so nothing can swap the file between check and install.
+  as_root _install "$file" "$file.sig" "$latest"
+  notify "omarchy-greeter updated" "Version $latest; takes effect at your next login."
+}
+
+cmd_auto_update() {
+  case ${1:-} in
+    "") [[ -e $NO_AUTO_UPDATE ]] && echo off || echo on ;;
+    on) rm -f "$NO_AUTO_UPDATE"; echo "omarchy-greeter updates with omarchy update." ;;
+    off) mkdir -p "$USER_CONF" && touch "$NO_AUTO_UPDATE"; echo "omarchy-greeter no longer updates itself; run omarchy-greeter update." ;;
+    toggle) if [[ $(cmd_auto_update) == "on" ]]; then cmd_auto_update off; else cmd_auto_update on; fi ;;
+    *) die "usage: omarchy-greeter auto-update [on|off|toggle]" ;;
+  esac
+}
+
+# Root side of `update`: copy the package and signature somewhere only root
+# can write, verify that copy against the shipped key, check it really is a
+# newer omarchy-greeter, and only then install it.
+root_install() {
+  (( EUID == 0 )) || die "must run as root"
+  local file=${1:-} sig=${2:-} want=${3:-} dir info pkgname pkgver installed
+  [[ -f $file && -f $sig && $want =~ ^[0-9]+(\.[0-9]+)*-[0-9]+$ ]] || die "usage: _install <package> <signature> <version>"
+  dir=$(mktemp -d /var/cache/omarchy-greeter-update.XXXXXX 2>/dev/null || mktemp -d)
+  chmod 700 "$dir"
+  trap 'rm -rf "$dir"' EXIT
+  head -c $((50 * 1024 * 1024)) -- "$file" > "$dir/package.pkg.tar.zst" < /dev/null
+  head -c 65536 -- "$sig" > "$dir/package.sig" < /dev/null
+  ssh-keygen -Y verify -f "$SIGNERS" -I omarchy-greeter-release -n omarchy-greeter-release \
+    -s "$dir/package.sig" < "$dir/package.pkg.tar.zst" >/dev/null 2>&1 || die "the release signature does not verify; not installing"
+  info=$(bsdtar -xOf "$dir/package.pkg.tar.zst" .PKGINFO) || die "not a package"
+  pkgname=$(sed -n 's/^pkgname = //p' <<<"$info")
+  pkgver=$(sed -n 's/^pkgver = //p' <<<"$info")
+  installed=$(pacman -Q omarchy-greeter 2>/dev/null | awk '{print $2}')
+  [[ $pkgname == "omarchy-greeter" && $pkgver == "$want" ]] || die "the signed package is not omarchy-greeter $want; not installing"
+  [[ -z $installed ]] || (( $(vercmp "$pkgver" "$installed") > 0 )) || die "$pkgver is not newer than $installed; not installing"
+  pacman -U --noconfirm "$dir/package.pkg.tar.zst"
+}
+
+# The post-update hook (run by `omarchy update`), kept current at login.
+cmd_hook_ensure() {
+  local src=/usr/share/omarchy-greeter/hooks/post-update
+  [[ -f $src ]] || return 0
+  mkdir -p "${HOOK%/*}"
+  cmp -s "$src" "$HOOK" || install -m 755 "$src" "$HOOK"
+  # Older versions installed it under another name.
+  rm -f "${HOOK%/*}/omarchy-greeter-lock"
+}
+
 cmd_status() {
   echo "Login and lock forms on:     $(cmd_monitor)"
-  echo "One password at boot:        $(cmd_boot_pass)"
+  local accounts boot_status
+  accounts=$(boot_pass_accounts)
+  boot_status=$(head -c 200 /run/omarchy-greeter/boot-unlock-status 2>/dev/null || true)
+  echo "One password at boot:        ${accounts:+on for ${accounts//,/, }}${accounts:-off}${boot_status:+ (this boot: $boot_status)}"
+  echo "Video backgrounds at login:  $(cmd_video)"
   echo "Multi-user lock (you):       $(cmd_lock)"
   echo "Your look on login screen:   $(cmd_publish)"
+  echo "Updates with omarchy update: $(cmd_auto_update)"
+  echo "Installed version:           $(pacman -Q omarchy-greeter 2>/dev/null | awk '{print $2}')"
   echo
   cmd_user_list
 }
@@ -304,9 +473,13 @@ case ${1:-status} in
   status) cmd_status ;;
   monitor) shift; cmd_monitor "$@" ;;
   boot-pass) shift; cmd_boot_pass "$@" ;;
+  video) shift; cmd_video "$@" ;;
   lock) shift; cmd_lock "$@" ;;
   publish) shift; cmd_publish "$@" ;;
   menu) shift; cmd_menu "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  auto-update) shift; cmd_auto_update "$@" ;;
+  hook) cmd_hook_ensure ;;
   user)
     shift
     case ${1:-list} in
@@ -319,8 +492,10 @@ case ${1:-status} in
     ;;
   # Root-side steps, reached only through as_root/sudo above.
   _set) shift; root_set "$@" ;;
+  _refresh-views) root_refresh_views ;;
+  _install) shift; root_install "$@" ;;
   _user-add) shift; root_user_add "$@" ;;
   _user-admin) shift; root_user_admin "$@" ;;
-  -h|--help|help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  -h|--help|help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command: $1 (see omarchy-greeter --help)" ;;
 esac

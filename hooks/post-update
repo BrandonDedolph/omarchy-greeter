@@ -1,6 +1,15 @@
 #!/bin/bash
-# omarchy-greeter: re-patch the lock screen after an Omarchy update changed
-# the built-in lock, so the improved lock keeps Omarchy's latest fixes.
-if [[ -x /usr/bin/omarchy-greeter-lock-setup && -d $HOME/.config/omarchy/plugins/${USER}.lock ]]; then
-  /usr/bin/omarchy-greeter-lock-setup --if-changed || true
+# omarchy-greeter: runs at the end of `omarchy update` (installed for every
+# account as ~/.config/omarchy/hooks/post-update.d/omarchy-greeter).
+command -v omarchy-greeter >/dev/null || exit 0
+
+# 1. A newer signed release, unless turned off (omarchy-greeter auto-update off).
+if [[ $(omarchy-greeter auto-update) == "on" ]]; then
+  omarchy-greeter update || echo "omarchy-greeter: update skipped (see above)"
+fi
+
+# 2. Omarchy's own lock screen may have changed in this update: rebuild the
+#    multi-user lock from it, if this account uses it.
+if [[ -d $HOME/.config/omarchy/plugins/${USER:-$(id -un)}.lock ]]; then
+  omarchy-greeter-lock-setup --if-changed || true
 fi

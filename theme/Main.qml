@@ -12,7 +12,7 @@ Rectangle {
   height: 1080
   color: "#000000"
 
-  readonly property string dataDir: (typeof config !== "undefined" && config.dataDir) ? String(config.dataDir) : "/var/lib/omarchy-greeter"
+  readonly property string dataDir: (typeof config !== "undefined" && config.dataDir) ? String(config.dataDir) : "/var/lib/omarchy-greeter/.view"
   readonly property string settingsFile: (typeof config !== "undefined" && config.settingsFile) ? String(config.settingsFile) : "/etc/omarchy-greeter.conf"
   readonly property string bootFlag: (typeof config !== "undefined" && config.bootFlag) ? String(config.bootFlag) : "/run/omarchy-greeter/boot-unlocked"
 
@@ -94,7 +94,8 @@ Rectangle {
 
   // Demo accounts for screenshots: theme.conf demoUsers=name:Real Name,...
   // (unset in normal use; the real accounts come from SDDM).
-  readonly property string demoUsers: String(config.demoUsers || "")
+  readonly property string demoUsers: (typeof config !== "undefined" && config.demoUsers) ? String(config.demoUsers) : ""
+  readonly property string demoHost: (typeof config !== "undefined" && config.demoHost) ? String(config.demoHost) : ""
   function addDemoUsers() {
     if (!demoUsers) return
     var list = demoUsers.split(",")
@@ -773,7 +774,7 @@ Rectangle {
     anchors.bottom: parent.bottom
     anchors.margins: 28 * root.ui
     textFormat: Text.PlainText
-    text: "  " + (config.demoHost || sddm.hostName) + (root.look && root.look.theme ? "     " + root.look.theme : "")
+    text: "  " + (root.demoHost || sddm.hostName) + (root.look && root.look.theme ? "     " + root.look.theme : "")
     color: root.alpha(root.cForeground, 0.8)
     font.family: root.fontFamily
     font.pixelSize: 14 * root.ui

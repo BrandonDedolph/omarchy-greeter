@@ -1,18 +1,31 @@
 #!/bin/bash
 # PAM step (pam_exec) at the top of /etc/pam.d/sddm's auth stack. Succeeds
-# exactly once per boot, for a real user, while boot-unlock-mark's mark is
-# present and fresh; otherwise fails, and PAM carries on to the normal
-# password check.
+# exactly once per boot, while boot-unlock-mark's mark is present and fresh,
+# for an account the mark names that could also log in with its password;
+# otherwise fails, and PAM carries on to the normal password check.
+# pam_exec runs this as root with the PAM_* values from the PAM stack itself.
 FLAG=/run/omarchy-greeter/boot-unlocked
 
-[[ ${PAM_TYPE:-} == auth && ${PAM_SERVICE:-} == sddm && -n ${PAM_USER:-} ]] || exit 1
+[[ ${PAM_TYPE:-} == auth && ${PAM_SERVICE:-} == sddm ]] || exit 1
+user=${PAM_USER:-}
+[[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || exit 1
 [[ -f $FLAG && ! -L $FLAG && $(stat -c %u "$FLAG") == 0 ]] || exit 1
 
 uptime=$(cut -d. -f1 /proc/uptime)
+[[ $uptime =~ ^[0-9]+$ ]] || exit 1
 if (( uptime >= 600 )); then rm -f "$FLAG"; exit 1; fi
 
-uid=$(id -u "$PAM_USER" 2>/dev/null) || exit 1
-(( uid >= 1000 && uid < 60000 )) || exit 1
+# Only the accounts the machine's admin named.
+read -r _ allowed < "$FLAG" || exit 1
+[[ ",$allowed," == *",$user,"* ]] || exit 1
+
+IFS=: read -r _ _ uid _ _ _ shell < <(getent passwd "$user") || exit 1
+[[ $uid =~ ^[0-9]+$ ]] && (( uid >= 1000 && uid < 60000 )) || exit 1
+# Never for an account that could not log in with a password: a locked or
+# empty password, or a shell that refuses logins.
+[[ $shell != */nologin && $shell != */false ]] && grep -qxF -- "$shell" /etc/shells || exit 1
+hash=$(getent shadow "$user" | cut -d: -f2)
+[[ -n $hash && $hash != '!'* && $hash != '*'* ]] || exit 1
 
 # Only for starting a new session. Returning to a running (locked) session
 # always takes that account's password.
@@ -31,5 +44,5 @@ fi
 
 # One login only: whoever claims the mark first.
 rm "$FLAG" 2>/dev/null || exit 1
-logger -t omarchy-greeter "boot unlock: $PAM_USER logged in with the disk password typed at boot"
+logger -t omarchy-greeter "boot unlock: $user logged in with the disk password typed at boot"
 exit 0

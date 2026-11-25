@@ -18,10 +18,13 @@ install:
 	install -Dm755 bin/omarchy-greeter-session-watch "$(DESTDIR)/usr/bin/omarchy-greeter-session-watch"
 	install -Dm644 lib/patch-lock.py "$(DESTDIR)/usr/lib/omarchy-greeter/patch-lock.py"
 	install -Dm755 lib/prepare-dirs "$(DESTDIR)/usr/lib/omarchy-greeter/prepare-dirs"
+	install -Dm755 lib/publish-view "$(DESTDIR)/usr/lib/omarchy-greeter/publish-view"
+	install -Dm644 systemd/system/omarchy-greeter-view@.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.service"
+	install -Dm644 systemd/system/omarchy-greeter-view@.path "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-view@.path"
 	install -Dm755 lib/boot-unlock-mark "$(DESTDIR)/usr/lib/omarchy-greeter/boot-unlock-mark"
 	install -Dm755 lib/boot-unlock-auth "$(DESTDIR)/usr/lib/omarchy-greeter/boot-unlock-auth"
 	install -Dm644 systemd/system/omarchy-greeter-boot-unlock.service "$(DESTDIR)/usr/lib/systemd/system/omarchy-greeter-boot-unlock.service"
-	install -Dm644 polkit/40-omarchy-self-admin.rules "$(DESTDIR)/usr/share/polkit-1/rules.d/40-omarchy-self-admin.rules"
+	install -Dm644 polkit/49-omarchy-greeter-self-admin.rules "$(DESTDIR)/usr/share/polkit-1/rules.d/49-omarchy-greeter-self-admin.rules"
 	install -Dm644 etc/omarchy-greeter.conf "$(DESTDIR)/etc/omarchy-greeter.conf"
 	install -Dm644 share/hyprland.lua "$(DESTDIR)/usr/share/omarchy-greeter/hyprland.lua"
 	install -Dm755 hooks/post-update "$(DESTDIR)/usr/share/omarchy-greeter/hooks/post-update"
@@ -32,10 +35,12 @@ install:
 	for f in theme/*.qml theme/metadata.desktop theme/theme.conf; do \
 		install -Dm644 "$$f" "$(DESTDIR)/usr/share/sddm/themes/omarchy-greeter/$$(basename "$$f")"; \
 	done
+	install -Dm644 keys/allowed_signers "$(DESTDIR)/usr/share/omarchy-greeter/allowed_signers"
 	install -Dm644 LICENSE "$(DESTDIR)/usr/share/licenses/omarchy-greeter/LICENSE"
 
 # Syntax checks for the scripts and QML.
 check:
-	bash -n bin/* lib/boot-unlock-mark lib/boot-unlock-auth lib/prepare-dirs hooks/post-update omarchy-greeter.install
-	python3 -m py_compile lib/patch-lock.py
+	bash -n bin/* lib/boot-unlock-mark lib/boot-unlock-auth lib/prepare-dirs hooks/post-update omarchy-greeter.install scripts/release scripts/install.sh
+	python3 -c 'import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]' lib/patch-lock.py lib/publish-view
+	luac -p share/hyprland.lua
 	! /usr/lib/qt6/bin/qmllint theme/*.qml 2>&1 | grep -E '\[syntax\]'

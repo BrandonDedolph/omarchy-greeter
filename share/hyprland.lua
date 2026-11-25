@@ -34,7 +34,8 @@ local primary = read_primary()
 --    screen is one, so every switch flipped the signal and both monitors
 --    resynced.
 --  * the same mode, position and scale per monitor as the last user's
---    desktop, published by omarchy-greeter-sync as "name WxH@R XxY scale".
+--    desktop, published by omarchy-greeter-sync and checked by publish-view
+--    as "name WxH@R XxY scale transform".
 try("SDR", function() hl.config({ render = { cm_auto_hdr = 0 } }) end)
 
 local function last_user()
@@ -51,16 +52,24 @@ end
 
 local function apply_user_monitors(user)
   if not user then return end
-  local file = io.open("/var/lib/omarchy-greeter/" .. user .. "/monitors", "r")
+  -- The root-checked copy (a regular, small, root-owned file), never the
+  -- account's own folder.
+  local file = io.open("/var/lib/omarchy-greeter/.view/" .. user .. "/monitors", "r")
   if not file then return end
+  local count = 0
   for line in file:lines() do
-    local name, mode, position, scale = line:match("^([%w._-]+) (%d+x%d+@[%d.]+) (%-?%d+x%-?%d+) ([%d.]+)$")
+    count = count + 1
+    if count > 16 then break end
+    local name, mode, position, scale, transform = line:match("^([%w._-]+) (%d+x%d+@[%d.]+) (%-?%d+x%-?%d+) ([%d.]+) ?(%d?)$")
     local s = tonumber(scale)
     local w, h = (mode or ""):match("^(%d+)x(%d+)")
     w, h = tonumber(w), tonumber(h)
     -- Written by the account; only plausible values are applied.
     if name and s and s >= 0.5 and s <= 4 and w and h and w >= 640 and h >= 480 and w <= 15360 and h <= 8640 then
-      hl.monitor({ output = name, mode = mode, position = position, scale = s })
+      local t = tonumber(transform)
+      local settings = { output = name, mode = mode, position = position, scale = s }
+      if t and t >= 0 and t <= 7 then settings.transform = t end
+      hl.monitor(settings)
     end
   end
   file:close()

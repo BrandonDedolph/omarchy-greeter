@@ -1,4 +1,5 @@
-// omarchy-greeter: on a machine with several admins, ask an admin for their
+// omarchy-greeter (49-: after site rules in 40-48, before the stock 50-default).
+// On a machine with several admins, ask an admin for their
 // OWN password when they do something that needs admin rights, instead of
 // polkit's default "any member of wheel", which makes Omarchy's password
 // dialog ask for the first admin on the list.

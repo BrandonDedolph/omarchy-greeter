@@ -13,7 +13,8 @@
 # To avoid restarting the desktop, rebuilds happen before the shell starts,
 # at login (omarchy-greeter-lock-update.service). The shell is restarted only
 # for the first setup of an account, and after an Omarchy update changed the
-# built-in lock (that update restarts the shell anyway).
+# built-in lock (that update restarts the shell anyway); a newer patch from
+# this package alone waits for the next login.
 #
 #   omarchy-greeter-lock-setup               rebuild now (restarts the shell if running)
 #   omarchy-greeter-lock-setup --ensure      first setup only (from the settings sync)
@@ -27,49 +28,66 @@ ID="${USER:-$(id -un)}.lock"
 DIR="$HOME/.config/omarchy/plugins/$ID"
 MARK="omarchy-greeter:primary-lock"
 OPTOUT="$HOME/.config/omarchy-greeter/no-primary-lock"
-HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"
+# Installed by older versions; the update hook now belongs to `omarchy-greeter hook`.
+OLD_HOOK="$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"
 PATCH="${OMARCHY_GREETER_PATCH:-/usr/lib/omarchy-greeter/patch-lock.py}"
 STAMP="$DIR/.omarchy-greeter-stamp"
+# The stamp of a build that failed, so it is not retried (and announced)
+# on every sync until the patch or Omarchy's lock changes.
+FAILED="$HOME/.config/omarchy-greeter/lock-failed"
 
-# What the clone was built from: this package's patch plus the stock plugin.
-# When either changes (package or Omarchy update), --ensure rebuilds it.
-stamp() { cat "$PATCH" /usr/share/omarchy/shell/plugins/lock/*.qml 2>/dev/null | sha256sum | cut -d' ' -f1; }
+# What the clone was built from: "<patch hash> <stock lock hash>". When
+# either changes (package or Omarchy update), the clone is rebuilt.
+stamp() {
+  printf '%s %s\n' "$(sha256sum < "$PATCH" | cut -d' ' -f1)" \
+    "$(cat /usr/share/omarchy/shell/plugins/lock/*.qml 2>/dev/null | sha256sum | cut -d' ' -f1)"
+}
 
-remove_clone() {
-  if [[ -d $DIR ]]; then
-    if ! grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null; then
-      echo "omarchy-greeter-lock-setup: $DIR was not made by this script; leaving it alone" >&2
-      exit 1
-    fi
-    omarchy plugin remove "$ID" --yes >/dev/null
+ours() { [[ -d $DIR ]] && grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null; }
+
+# Without a running shell (at login, or on package removal): put Omarchy's
+# own lock back by editing the files directly.
+remove_offline() {
+  ours || return 0
+  rm -rf "$DIR"
+  local config="$HOME/.config/omarchy/shell.json" tmp
+  [[ -f $config ]] || return 0
+  tmp=$(mktemp "$config.XXXXXX")
+  if jq --arg id "$ID" '
+      (if .plugins then .plugins |= map(select((.id? // .) != $id)) else . end)
+      | (if .disabledPlugins then .disabledPlugins -= ["omarchy.lock", $id] else . end)
+      | (if .cloneSourceRestores then .cloneSourceRestores -= [$id] else . end)' "$config" > "$tmp"; then
+    mv -f "$tmp" "$config"
+  else
+    rm -f "$tmp"
   fi
 }
 
-# Package removal (run for each account, without its desktop running): put
-# Omarchy's own lock back by editing the files directly.
-if [[ ${1:-} == --uninstall ]]; then
-  if [[ -d $DIR ]] && grep -q "$MARK" "$DIR/Service.qml" 2>/dev/null; then
-    rm -rf "$DIR"
-    config="$HOME/.config/omarchy/shell.json"
-    if [[ -f $config ]]; then
-      tmp=$(mktemp "$config.XXXXXX")
-      if jq --arg id "$ID" '
-          (if .plugins then .plugins |= map(select((.id? // .) != $id)) else . end)
-          | (if .disabledPlugins then .disabledPlugins -= ["omarchy.lock", $id] else . end)
-          | (if .cloneSourceRestores then .cloneSourceRestores -= [$id] else . end)' "$config" > "$tmp"; then
-        mv -f "$tmp" "$config"
-      else
-        rm -f "$tmp"
-      fi
-    fi
+remove_clone() {
+  [[ -d $DIR ]] || return 0
+  if ! ours; then
+    echo "omarchy-greeter-lock-setup: $DIR was not made by this script; leaving it alone" >&2
+    exit 1
   fi
-  rm -f "$HOOK"
+  if omarchy-shell shell ping >/dev/null 2>&1; then
+    omarchy plugin remove "$ID" --yes >/dev/null 2>&1 || remove_offline
+    # `omarchy plugin remove` keeps a backup; this clone is rebuilt from
+    # Omarchy's lock anyway.
+    rm -rf "$HOME/.config/omarchy/plugins/.$ID.bak."*
+  else
+    remove_offline
+  fi
+}
+
+if [[ ${1:-} == --uninstall ]]; then
+  remove_offline
+  rm -f "$OLD_HOOK" "$FAILED"
   exit 0
 fi
 
 if [[ ${1:-} == --remove ]]; then
   remove_clone
-  rm -f "$HOOK"
+  rm -f "$OLD_HOOK" "$FAILED"
   mkdir -p "${OPTOUT%/*}" && touch "$OPTOUT"
   # The built-in lock only takes over cleanly in a fresh shell.
   if omarchy-shell shell ping >/dev/null 2>&1; then omarchy restart shell >/dev/null 2>&1 || true; fi
@@ -78,11 +96,21 @@ if [[ ${1:-} == --remove ]]; then
 fi
 
 mode=${1:-}
-up_to_date() { [[ -d $DIR && -r $STAMP && $(<"$STAMP") == "$(stamp)" ]]; }
+current=$(stamp)
+built=$(cat "$STAMP" 2>/dev/null || true)
+up_to_date() { [[ -d $DIR && $built == "$current" ]]; }
+failed_before() { [[ $(cat "$FAILED" 2>/dev/null) == "$current" ]]; }
 case $mode in
-  --ensure) [[ -e $OPTOUT || -d $DIR ]] && exit 0 ;;
-  --if-changed|--at-login) [[ -e $OPTOUT || ! -d $DIR ]] && exit 0; up_to_date && exit 0 ;;
-  "") rm -f "$OPTOUT" ;;
+  --ensure) [[ -e $OPTOUT || -d $DIR ]] && exit 0; failed_before && exit 0 ;;
+  --at-login) [[ -e $OPTOUT || ! -d $DIR ]] && exit 0; up_to_date && exit 0; failed_before && exit 0 ;;
+  --if-changed)
+    # After `omarchy update`: only when Omarchy's own lock changed (that
+    # update restarted the shell already). A newer patch waits for login.
+    [[ -e $OPTOUT || ! -d $DIR ]] && exit 0
+    [[ ${built#* } == "${current#* }" ]] && exit 0
+    failed_before && exit 0
+    ;;
+  "") rm -f "$OPTOUT" "$FAILED" ;;
   *) echo "usage: omarchy-greeter-lock-setup [--ensure|--if-changed|--at-login|--remove]" >&2; exit 2 ;;
 esac
 
@@ -104,10 +132,11 @@ reload_lock() {
 
 give_up() {
   echo "omarchy-greeter-lock-setup: $1; staying on the built-in lock" >&2
-  if [[ -d $DIR ]]; then
-    omarchy plugin remove "$ID" --yes >/dev/null 2>&1 || true
-    reload_lock
+  mkdir -p "${FAILED%/*}" && printf '%s\n' "$current" > "$FAILED"
+  if ours; then
+    if [[ $mode == --at-login ]]; then remove_offline; else remove_clone; reload_lock; fi
   fi
+  # Shown now, or (before the desktop starts) by journal only.
   notify-send -u critical "Lock screen" "$2" 2>/dev/null || true
   exit 1
 }
@@ -137,10 +166,10 @@ for file in "$work"/*; do
   [[ $(basename "$file") == manifest.json ]] && continue
   cp -rf "$file" "$DIR/"
 done
-stamp > "$STAMP"
+printf '%s\n' "$current" > "$STAMP"
+rm -f "$FAILED"
 reload_lock
 
-# Re-check after each `omarchy update` so the lock keeps Omarchy's fixes.
-mkdir -p "${HOOK%/*}"
-install -m 755 /usr/share/omarchy-greeter/hooks/post-update "$HOOK" 2>/dev/null || true
+# (`omarchy update` re-checks through the post-update hook, which
+# omarchy-greeter-sync installs for every account.)
 echo "Lock screen now shows on the primary monitor only ($DIR)."

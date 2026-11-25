@@ -4,7 +4,8 @@
 # The SDDM greeter runs as the `sddm` user and cannot read anyone's home, so
 # each user copies a screen-sized still of their background, their theme
 # colors, their avatar and their display sizing into
-# /var/lib/omarchy-greeter/<user>/, a folder they own and the greeter can read.
+# /var/lib/omarchy-greeter/<user>/, a private folder they own. A root service
+# (publish-view) checks every file there and copies it for the greeter.
 #
 # Runs from two places:
 #   - in the user's session, from a systemd user path unit, whenever their
@@ -38,9 +39,23 @@ MAX_VIDEO_BYTES=$((150 * 1024 * 1024))
 
 log() { echo "omarchy-greeter-sync: $*" >&2; }
 
+# The menu entries, update hook and lock screen, kept current from inside a
+# session whether or not this account publishes its look.
+session_setup() {
+  (( ! offline )) && [[ -z ${OMARCHY_GREETER_DIR:-} ]] || return 0
+  if command -v omarchy-greeter >/dev/null; then
+    omarchy-greeter menu ensure >/dev/null || log "could not add the menu entries"
+    omarchy-greeter hook || log "could not install the update hook"
+  fi
+  if command -v omarchy-greeter-lock-setup >/dev/null; then
+    omarchy-greeter-lock-setup --ensure || log "lock screen setup failed; will retry next time"
+  fi
+}
+
 # Opted out (omarchy-greeter publish off): the login screen shows the
 # default look for this account.
 if [[ -e ${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter/no-publish ]]; then
+  session_setup
   exit 0
 fi
 
@@ -52,6 +67,8 @@ fi
 # A theme switch rewrites several files in a row; let it settle first.
 (( now )) || sleep 1.5
 
+# Left by a run that was killed.
+find "$DEST" -maxdepth 1 -name '.sync.*' -type d -mmin +10 -exec rm -rf {} + 2>/dev/null || true
 work=$(mktemp -d "$DEST/.sync.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
@@ -78,7 +95,7 @@ unchanged=0
 if [[ -n $source_key && -r $DEST/source && $(<"$DEST/source") == "$source_key" && -e $DEST/background.jpg ]]; then
   unchanged=1
   cp "$DEST/background.jpg" "$work/background.jpg"
-  video=$(<"$DEST/video" 2>/dev/null) || video=""
+  video=$(cat "$DEST/video" 2>/dev/null || true)
   [[ -n $video && -e $DEST/$video ]] || video=""
 fi
 
@@ -128,7 +145,7 @@ font_family=$(omarchy-font-current 2>/dev/null || fc-match -f '%{family[0]}' mon
 font_size=""
 for toml in "$HOME/.config/omarchy/shell.toml" "$STATE/theme/shell.toml"; do
   [[ -r $toml ]] || continue
-  font_size=$(awk '/^\[/{s=$0} s=="[font]" && $1=="base-size"{gsub(/[^0-9.]/,"",$3); print $3; exit}' "$toml")
+  font_size=$(awk -F= '/^[[:space:]]*\[/{s=$0; gsub(/[[:space:]]/,"",s)} s=="[font]" && $1 ~ /^[[:space:]]*base-size[[:space:]]*$/ {gsub(/[^0-9.]/,"",$2); print $2; exit}' "$toml")
   [[ -n $font_size ]] && break
 done
 
@@ -136,17 +153,19 @@ monitors_from_config() {
   local file="$HOME/.config/hypr/monitors.lua"
   [[ -r $file ]] || { echo '{}'; return; }
   # hl.monitor({ output = "DP-1", mode = "3840x2160@120", position = "0x0", scale = 1 })
-  grep -E '^[[:space:]]*hl\.monitor\(' "$file" | while IFS= read -r line; do
+  { grep -E '^[[:space:]]*hl\.monitor\(' "$file" || true; } | while IFS= read -r line; do
     output=$(sed -nE 's/.*output[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' <<<"$line")
     [[ -n $output ]] || continue
     mode=$(sed -nE 's/.*mode[[:space:]]*=[[:space:]]*"([0-9]+x[0-9]+(@[0-9.]+)?)".*/\1/p' <<<"$line")
     position=$(sed -nE 's/.*position[[:space:]]*=[[:space:]]*"(-?[0-9]+x-?[0-9]+)".*/\1/p' <<<"$line")
     scale=$(sed -nE 's/.*scale[[:space:]]*=[[:space:]]*"?([0-9.]+)"?.*/\1/p' <<<"$line")
-    jq -n --arg name "$output" --arg mode "$mode" --arg position "$position" --arg scale "$scale" '
+    transform=$(sed -nE 's/.*transform[[:space:]]*=[[:space:]]*"?([0-7])"?.*/\1/p' <<<"$line")
+    jq -n --arg name "$output" --arg mode "$mode" --arg position "$position" --arg scale "$scale" --arg transform "$transform" '
       ($mode | capture("^(?<w>[0-9]+)x(?<h>[0-9]+)(@(?<r>[0-9.]+))?$")? // {}) as $m
       | ($position | capture("^(?<x>-?[0-9]+)x(?<y>-?[0-9]+)$")? // {}) as $p
       | {($name): ({}
           + (if $scale != "" then {scale: ($scale | tonumber)} else {} end)
+          + (if $transform != "" then {transform: ($transform | tonumber)} else {} end)
           + (if $m.w then {width: ($m.w | tonumber), height: ($m.h | tonumber)} else {} end)
           + (if $m.r then {refresh: ($m.r | tonumber)} else {} end)
           + (if $p.x then {x: ($p.x | tonumber), y: ($p.y | tonumber)} else {} end))}'
@@ -156,7 +175,12 @@ monitors_from_config() {
 monitors=""
 if (( ! offline )); then
   monitors=$(hyprctl monitors -j 2>/dev/null | jq -c '
-    map({(.name): {scale, width, height, refresh: .refreshRate, x, y}}) | add // {}' 2>/dev/null || true)
+    map({(.name): {scale, width, height, refresh: .refreshRate, x, y, transform}}) | add // {}' 2>/dev/null || true)
+elif [[ -r $DEST/display.json && ! $HOME/.config/hypr/monitors.lua -nt $DEST/display.json ]]; then
+  # At boot: what the desktop last reported live is more complete than what
+  # the config spells out (mode "preferred", position "auto"), unless the
+  # config changed since.
+  monitors=$(jq -c '.monitors // {}' "$DEST/display.json" 2>/dev/null || true)
 fi
 [[ -n $monitors && $monitors != "{}" ]] || monitors=$(monitors_from_config)
 if [[ -z $monitors || $monitors == "{}" ]] && [[ -r $DEST/display.json ]]; then
@@ -169,7 +193,7 @@ jq -n --arg family "$font_family" --arg size "${font_size:-12}" --argjson monito
 # drives the displays exactly as the desktop does (no mode change, and so no
 # blackout, when switching between them):  name WxH@R XxY scale
 jq -r '.monitors | to_entries[] | select(.value.width and .value.height)
-  | "\(.key) \(.value.width)x\(.value.height)@\((.value.refresh // 60) * 1000 | round / 1000) \(.value.x // 0)x\(.value.y // 0) \(.value.scale // 1)"' \
+  | "\(.key) \(.value.width)x\(.value.height)@\((.value.refresh // 60) * 1000 | round / 1000) \(.value.x // 0)x\(.value.y // 0) \(.value.scale // 1) \(.value.transform // 0)"' \
   "$work/display.json" > "$work/monitors"
 
 printf '%s\n' "$video" > "$work/video"
@@ -178,7 +202,7 @@ if (( unchanged )) && [[ -r $DEST/updated ]]; then cp "$DEST/updated" "$work/upd
 # ---- publish ------------------------------------------------------------
 # Move each file into place on its own, so the greeter never sees a half-
 # written image, then drop what this run no longer publishes.
-chmod 644 "$work"/*
+chmod 600 "$work"/*
 for name in colors.toml theme.name background.jpg avatar.png display.json monitors source video updated; do
   if [[ -e $work/$name ]]; then
     mv -f "$work/$name" "$DEST/$name"
@@ -193,12 +217,4 @@ done
 
 log "published ${background:-no background} for $USER_NAME$( (( unchanged )) && echo ' (background unchanged)')"
 
-# The Setup > Login & Lock entries in the Omarchy menu (kept current).
-if (( ! offline )) && [[ -z ${OMARCHY_GREETER_DIR:-} ]] && command -v omarchy-greeter >/dev/null; then
-  omarchy-greeter menu ensure >/dev/null || log "could not add the menu entries"
-fi
-
-# First run for this user in a session: set up the improved lock screen.
-if (( ! offline )) && [[ -z ${OMARCHY_GREETER_DIR:-} ]] && command -v omarchy-greeter-lock-setup >/dev/null; then
-  omarchy-greeter-lock-setup --ensure || log "lock screen setup failed; will retry next time"
-fi
+session_setup

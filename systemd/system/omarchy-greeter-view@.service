@@ -1,0 +1,21 @@
+[Unit]
+Description=Check %i's published look and copy it for the login screen
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/omarchy-greeter/publish-view %i
+TimeoutStartSec=300
+Nice=10
+# Root, but only for what it needs: read the account's folder, write the
+# view, chown to sddm and drop to nobody for decoding.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/omarchy-greeter
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_SETUID CAP_SETGID CAP_SETPCAP

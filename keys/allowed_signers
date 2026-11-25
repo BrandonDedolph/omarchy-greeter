@@ -1,0 +1,3 @@
+# Release signing key(s) for omarchy-greeter. Updates and the installer only accept
+# packages signed by a key listed here (ssh-keygen -Y verify, namespace omarchy-greeter-release).
+omarchy-greeter-release namespaces="omarchy-greeter-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE850ecSGG9G4LfPf0/qCs3WeSiKXqXepHaUcjU/893M

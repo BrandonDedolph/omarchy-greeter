@@ -1,0 +1,377 @@
+#!/usr/bin/python3 -I
+"""Copy one account's published look into what the login screen reads.
+
+    publish-view <account>     (as root; from omarchy-greeter-view@.service)
+
+Each account writes its look into /var/lib/omarchy-greeter/<account>/, a
+folder it owns. The login screen runs as `sddm` and receives every
+password, so it never reads those files directly: this copies them into
+/var/lib/omarchy-greeter/.view/<account>/ (root-owned, readable only by
+sddm) after checking every one:
+
+  - only regular files owned by the account, opened without following
+    links or blocking (no symlinks, FIFOs or devices), each with a size cap;
+  - text is checked against what the login screen expects; display sizing
+    is parsed and rebuilt from known keys and plausible numbers;
+  - images are decoded and re-encoded as an unprivileged user (nobody),
+    with the decoder forced to JPEG or PNG, so the login screen only ever
+    decodes images this step produced;
+  - a video background is copied only when the machine allows it
+    (video=yes in /etc/omarchy-greeter.conf), remuxed as nobody with the
+    container format forced, video stream only.
+
+Anything that fails a check is left out, so the login screen falls back to
+its defaults for that piece.
+"""
+
+import grp
+import hashlib
+import json
+import os
+import pwd
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = "/var/lib/omarchy-greeter"
+VIEW = os.path.join(ROOT, ".view")
+CONF = "/etc/omarchy-greeter.conf"
+NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+MONITOR_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+
+KIB, MIB = 1024, 1024 * 1024
+TEXT_LIMITS = {
+    "colors.toml": 64 * KIB,
+    "theme.name": 256,
+    "display.json": 64 * KIB,
+    "session": 64,
+    "switch-to": 64,
+    "updated": 32,
+    "video": 64,
+}
+SANDBOX = ["setpriv", "--reuid=nobody", "--regid=nobody", "--clear-groups",
+           "--no-new-privs", "--inh-caps=-all", "--"]
+SANDBOX_ENV = {"PATH": "/usr/bin", "HOME": "/nonexistent", "TMPDIR": "/tmp", "LANG": "C.UTF-8"}
+MAGICK_LIMITS = ["-limit", "memory", "512MiB", "-limit", "map", "1GiB",
+                 "-limit", "width", "16384", "-limit", "height", "16384",
+                 "-limit", "area", "128MP", "-limit", "time", "60"]
+
+
+def log(message):
+    print(f"publish-view: {message}", file=sys.stderr)
+
+
+def conf_value(key):
+    value = ""
+    try:
+        with open(CONF, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(rf"^\s*{key}\s*=\s*([^\s#]*)", line)
+                if m:
+                    value = m.group(1)
+    except OSError:
+        pass
+    return value
+
+
+class Source:
+    """The account's own folder, opened once without following links."""
+
+    def __init__(self, path, uid):
+        self.uid = uid
+        self.fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        st = os.fstat(self.fd)
+        if st.st_uid != uid:
+            raise PermissionError(f"{path} is not owned by the account")
+
+    def read(self, name, limit):
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.fd)
+        except OSError:
+            return None
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != self.uid or st.st_size > limit:
+                return None
+            chunks, total = [], 0
+            while True:
+                chunk = os.read(fd, min(1 * MIB, limit + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > limit:
+                    return None
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+
+    def signature(self):
+        """What changed since the last pass (names, sizes, mtimes)."""
+        out = []
+        for entry in sorted(os.listdir(self.fd)):
+            try:
+                st = os.stat(entry, dir_fd=self.fd, follow_symlinks=False)
+            except OSError:
+                continue
+            out.append((entry, st.st_size, st.st_mtime_ns))
+        return out
+
+
+def text(data):
+    if data is None:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def number(value, low, high):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if low <= value <= high else None
+
+
+def clean_display(raw):
+    """Rebuild display.json from the keys the login screen uses."""
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    family = data.get("fontFamily")
+    if isinstance(family, str) and re.fullmatch(r"[\w .+-]{1,64}", family):
+        out["fontFamily"] = family
+    size = number(data.get("fontBaseSize"), 6, 48)
+    if size is not None:
+        out["fontBaseSize"] = size
+    monitors = {}
+    raw_monitors = data.get("monitors")
+    if isinstance(raw_monitors, dict):
+        for name, m in list(raw_monitors.items())[:16]:
+            if not MONITOR_RE.match(str(name)) or not isinstance(m, dict):
+                continue
+            entry = {}
+            for key, low, high in (("scale", 0.5, 4), ("width", 640, 15360), ("height", 480, 8640),
+                                   ("refresh", 1, 1000), ("x", -65536, 65536), ("y", -65536, 65536),
+                                   ("transform", 0, 7)):
+                value = number(m.get(key), low, high)
+                if value is not None:
+                    entry[key] = value
+            if "transform" in entry:
+                entry["transform"] = int(entry["transform"])
+            monitors[name] = entry
+    out["monitors"] = monitors
+    return out
+
+
+def monitor_lines(display):
+    """The compositor's per-monitor lines: name WxH@R XxY scale transform."""
+    lines = []
+    for name, m in display.get("monitors", {}).items():
+        if "width" not in m or "height" not in m:
+            continue
+        refresh = round(m.get("refresh", 60), 3)
+        lines.append(f"{name} {int(m['width'])}x{int(m['height'])}@{refresh:g} "
+                     f"{int(m.get('x', 0))}x{int(m.get('y', 0))} {m.get('scale', 1):g} {m.get('transform', 0)}")
+    return "".join(line + "\n" for line in lines)
+
+
+def sandboxed(cmd, data=None, timeout=90, limit=64 * MIB):
+    try:
+        result = subprocess.run(SANDBOX + cmd, input=data, capture_output=True, timeout=timeout,
+                                env=SANDBOX_ENV, cwd="/")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"{cmd[0]} failed: {e}")
+        return None
+    if result.returncode != 0 or not result.stdout or len(result.stdout) > limit:
+        log(f"{cmd[0]} rejected the file: {result.stderr.decode(errors='replace').strip()[:200]}")
+        return None
+    return result.stdout
+
+
+def reencode_jpeg(data):
+    if data is None or not data.startswith(b"\xff\xd8\xff"):
+        return None
+    return sandboxed(["magick", *MAGICK_LIMITS, "jpeg:-", "-strip", "-quality", "90", "jpeg:-"], data)
+
+
+def reencode_png(data):
+    if data is None or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return None
+    return sandboxed(["magick", *MAGICK_LIMITS, "png:-", "-resize", "256x256^", "-gravity", "center",
+                      "-extent", "256x256", "-strip", "png:-"], data, limit=4 * MIB)
+
+
+def remux_video(data, ext):
+    if data is None:
+        return None
+    if ext in ("mp4", "mov", "m4v") and data[4:8] == b"ftyp":
+        demuxer = "mov"
+    elif ext in ("webm", "mkv") and data.startswith(b"\x1a\x45\xdf\xa3"):
+        demuxer = "matroska"
+    else:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "in")
+        with open(path, "wb") as f:
+            f.write(data)
+        os.chmod(path, 0o644)
+        os.chmod(tmp, 0o711)  # nobody may open the file by name, not list the folder
+        return sandboxed(["ffmpeg", "-nostdin", "-v", "error", "-protocol_whitelist", "file",
+                          "-f", demuxer, "-i", path, "-map", "0:v:0", "-c", "copy",
+                          "-an", "-sn", "-dn", "-f", "matroska", "pipe:1"],
+                         timeout=180, limit=200 * MIB)
+
+
+class View:
+    """/var/lib/omarchy-greeter/.view/<account>/, written atomically."""
+
+    def __init__(self, name, gid):
+        self.gid = gid
+        os.makedirs(VIEW, exist_ok=True)
+        for path in (VIEW, os.path.join(VIEW, name)):
+            os.makedirs(path, exist_ok=True)
+            st = os.lstat(path)
+            if not stat.S_ISDIR(st.st_mode):
+                raise RuntimeError(f"{path} is not a folder")
+            os.chown(path, 0, gid)
+            os.chmod(path, 0o750)
+        self.dir = os.path.join(VIEW, name)
+        self.written = set()
+
+    def path(self, name):
+        return os.path.join(self.dir, name)
+
+    def current(self, name):
+        try:
+            with open(self.path(name), "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def write(self, name, data):
+        if isinstance(data, str):
+            data = data.encode()
+        self.written.add(name)
+        if self.current(name) == data:
+            return
+        fd, tmp = tempfile.mkstemp(dir=self.dir, prefix=".tmp.")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chown(tmp, 0, self.gid)
+        os.chmod(tmp, 0o640)
+        os.replace(tmp, self.path(name))
+
+    def keep(self, name):
+        self.written.add(name)
+
+    def prune(self):
+        for entry in os.listdir(self.dir):
+            if entry not in self.written:
+                os.unlink(self.path(entry))
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest() if data is not None else ""
+
+
+def media(view, src, name, limit, convert, out_name=None):
+    """Re-encode one image or video, skipping the work when it is unchanged."""
+    out_name = out_name or name
+    data = src.read(name, limit)
+    if data is None:
+        return False
+    key = f".hash-{out_name}"
+    if view.current(key) == digest(data).encode() and view.current(out_name) is not None:
+        view.keep(out_name)
+        view.keep(key)
+        return True
+    result = convert(data)
+    if result is None:
+        return False
+    view.write(out_name, result)
+    view.write(key, digest(data))
+    return True
+
+
+def publish(name, src, view):
+    # Small files first: the switch-to request and session marker matter
+    # the moment a login screen opens.
+    value = text(src.read("switch-to", TEXT_LIMITS["switch-to"]))
+    if value and re.fullmatch(r"\d{1,12} [a-z_][a-z0-9_-]{0,31}\n?", value):
+        view.write("switch-to", value)
+    value = text(src.read("session", TEXT_LIMITS["session"]))
+    if value and re.fullmatch(r"[0-9a-zA-Z]{1,32}\n?", value):
+        view.write("session", value)
+    value = text(src.read("updated", TEXT_LIMITS["updated"]))
+    if value and re.fullmatch(r"\d{1,12}\n?", value):
+        view.write("updated", value)
+    value = text(src.read("theme.name", TEXT_LIMITS["theme.name"]))
+    if value and re.fullmatch(r"[\w .+-]{1,64}", value.strip()):
+        view.write("theme.name", value.strip() + "\n")
+    value = text(src.read("colors.toml", TEXT_LIMITS["colors.toml"]))
+    if value is not None:
+        # Only the `key = "#rrggbb"` lines the login screen reads.
+        lines = re.findall(r'(?m)^\s*([a-z_]{1,32})\s*=\s*"(#[0-9a-fA-F]{6})"', value)
+        view.write("colors.toml", "".join(f'{k} = "{v}"\n' for k, v in lines[:64]))
+    display = clean_display(text(src.read("display.json", TEXT_LIMITS["display.json"])))
+    if display is not None:
+        view.write("display.json", json.dumps(display, separators=(",", ":")) + "\n")
+        view.write("monitors", monitor_lines(display))
+
+    media(view, src, "background.jpg", 40 * MIB, reencode_jpeg)
+    media(view, src, "avatar.png", 8 * MIB, reencode_png)
+
+    video = (text(src.read("video", TEXT_LIMITS["video"])) or "").strip()
+    m = re.fullmatch(r"background\.(mp4|webm|mkv|mov|m4v)", video)
+    if m and conf_value("video") == "yes":
+        if media(view, src, video, 150 * MIB, lambda data: remux_video(data, m.group(1)), "background.mkv"):
+            view.write("video", "background.mkv\n")
+
+
+def main():
+    if os.geteuid() != 0 or len(sys.argv) != 2:
+        print("usage: publish-view <account>  (as root)", file=sys.stderr)
+        return 2
+    name = sys.argv[1]
+    if not NAME_RE.match(name):
+        log(f"not an account name: {name!r}")
+        return 1
+    try:
+        account = pwd.getpwnam(name)
+        sddm_gid = grp.getgrnam("sddm").gr_gid
+    except KeyError as e:
+        log(f"unknown account or group: {e}")
+        return 1
+    view_dir = os.path.join(VIEW, name)
+    try:
+        src = Source(os.path.join(ROOT, name), account.pw_uid)
+    except OSError as e:
+        # No published folder: nothing to show for this account.
+        if os.path.isdir(view_dir) and not os.path.islink(view_dir):
+            for entry in os.listdir(view_dir):
+                os.unlink(os.path.join(view_dir, entry))
+        log(f"{name}: {e}")
+        return 0
+    view = View(name, sddm_gid)
+    # The account may still be writing; go again until a pass saw no change.
+    for _ in range(5):
+        before = src.signature()
+        view.written = set()
+        publish(name, src, view)
+        if src.signature() == before:
+            break
+        time.sleep(0.3)
+    view.prune()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -14,6 +14,9 @@ if [[ -n $target && -w $dir ]]; then
   printf '%s %s\n' "$(date +%s)" "$target" > "$dir/.switch-to.tmp"
   chmod 644 "$dir/.switch-to.tmp"
   mv -f "$dir/.switch-to.tmp" "$dir/switch-to"
+  # publish-view copies it for the login screen within moments; give it a
+  # head start on the login screen opening.
+  sleep 0.3
 fi
 exec busctl --system call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
   org.freedesktop.DisplayManager.Seat SwitchToGreeter
