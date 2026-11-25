@@ -97,12 +97,41 @@ Rectangle {
     }
   }
 
+  property string requestedUser: ""
+  function applyRequestedUser() {
+    if (!requestedUser) return
+    for (var i = 0; i < users.length; i++) {
+      if (users[i].name === requestedUser) {
+        requestedUser = ""
+        selectUser(i)
+        return
+      }
+    }
+  }
+
+  // Has this account a session running (Locked) or not (Log in)?
+  function readSession(name) {
+    readText(dataDir + "/" + name + "/session", function(id) {
+      id = id.trim()
+      if (!/^[0-9a-zA-Z]+$/.test(id)) { setLook(name, "running", false); return }
+      readText("/run/systemd/sessions/" + id, function(text) { setLook(name, "running", text.length > 0) })
+    })
+  }
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.showsUi
+    onTriggered: { for (var i = 0; i < root.users.length; i++) root.readSession(root.users[i].name) }
+  }
+  readonly property bool userRunning: !!(look && look.running)
+
   function addUser(entry) {
     var list = users.slice()
     list.push(entry)
     users = list
     loadLook(entry.name)
     if (current < 0 || entry.name === userModel.lastUser) current = list.length - 1
+    applyRequestedUser()
   }
 
   function selectUser(index, fromOtherScreen) {
@@ -197,6 +226,15 @@ Rectangle {
       setLook(name, "display", parsed)
     })
     readText(dir + "theme.name", function(text) { setLook(name, "theme", text.trim()) })
+    readSession(name)
+    // A lock screen's "Switch user" names the account to preselect.
+    readText(dir + "switch-to", function(text) {
+      var parts = text.trim().split(" ")
+      if (parts.length === 2 && Date.now() / 1000 - Number(parts[0]) < 120) {
+        root.requestedUser = parts[1]
+        root.applyRequestedUser()
+      }
+    })
     readText(dir + "video", function(text) {
       var file = text.trim()
       setLook(name, "video", /^background\.(mp4|webm|mkv|mov|m4v)$/.test(file) ? fileUrl(dir + file) : "")
@@ -433,6 +471,15 @@ Rectangle {
         font.family: root.fontFamily
         font.pixelSize: 15 * root.ui
       }
+      Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        visible: !!root.user
+        text: root.userRunning ? "\uf023  Locked \u00b7 resumes session" : "\uf2f6  Log in"
+        color: root.userRunning ? root.cAccent : root.alpha(root.cForeground, 0.75)
+        font.family: root.fontFamily
+        font.pixelSize: 13 * root.ui
+        topPadding: 4 * root.ui
+      }
     }
 
     // Password field
@@ -477,7 +524,7 @@ Rectangle {
         anchors.leftMargin: 52 * root.ui
         anchors.verticalCenter: parent.verticalCenter
         visible: password.text.length === 0 && !root.authenticating
-        text: root.loginFailed ? "Wrong password, try again" : (root.bootUnlocked ? "Unlocked at boot \u00b7 press Enter" : "Password")
+        text: root.loginFailed ? "Wrong password, try again" : (root.bootUnlocked ? "Unlocked at boot \u00b7 press Enter" : (root.userRunning ? "Password to unlock" : "Password"))
         color: root.loginFailed ? root.cError : root.cMuted
         font.family: root.fontFamily
         font.pixelSize: 16 * root.ui
@@ -639,6 +686,26 @@ Rectangle {
             ink: chip.entryLook && chip.entryLook.colors && chip.entryLook.colors.background ? chip.entryLook.colors.background : root.cBackground
             ring: chip.selected ? root.cBright : "transparent"
             fontFamily: root.fontFamily
+          }
+
+          Rectangle {
+            visible: !!(chip.entryLook && chip.entryLook.running)
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: -2 * root.ui
+            width: 18 * root.ui
+            height: width
+            radius: width / 2
+            color: root.cBackground
+            border.color: root.cAccent
+            border.width: 1
+            Text {
+              anchors.centerIn: parent
+              text: "\uf023"
+              color: root.cAccent
+              font.family: root.fontFamily
+              font.pixelSize: 9 * root.ui
+            }
           }
 
           MouseArea {

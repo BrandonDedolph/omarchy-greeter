@@ -18,7 +18,7 @@ post_install() {
   systemctl daemon-reload
   systemctl enable --now omarchy-greeter-dirs.service
   systemctl enable omarchy-greeter-boot-unlock.service
-  systemctl --global enable omarchy-greeter-sync.path omarchy-greeter-sync.service
+  systemctl --global enable omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service
   add_pam_line
   echo ">> Each user: log in once (or run 'systemctl --user daemon-reload && systemctl --user enable --now omarchy-greeter-sync.path && omarchy-greeter-sync --now') to publish their look."
 }
@@ -26,13 +26,14 @@ post_install() {
 post_upgrade() {
   systemctl daemon-reload
   systemctl enable omarchy-greeter-boot-unlock.service
+  systemctl --global enable omarchy-greeter-presence.service
   add_pam_line
 }
 
 pre_remove() {
   remove_pam_line
   systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
-  systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service || true
+  systemctl --global disable omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service || true
   rm -f /run/omarchy-greeter/boot-unlocked
 }
 

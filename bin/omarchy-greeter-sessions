@@ -1,0 +1,19 @@
+#!/bin/bash
+# For the lock screen: who I am, and which other accounts are signed in on
+# this machine right now (one entry per account, graphical sessions only).
+set -euo pipefail
+me=$(id -un)
+avatar="/var/lib/omarchy-greeter/$me/avatar.png"
+[[ -r $avatar ]] || avatar=""
+real_name() { getent passwd "$1" | cut -d: -f5 | cut -d, -f1; }
+
+others=$(loginctl list-sessions --json=short 2>/dev/null |
+  jq -r --arg me "$me" '[.[] | select(.user != $me and .class == "user" and .seat != null) | .user] | unique | .[]' 2>/dev/null || true)
+
+{
+  printf '%s\t%s\n' "$me" "$(real_name "$me")"
+  for user in $others; do printf '%s\t%s\n' "$user" "$(real_name "$user")"; done
+} | jq -R -s -c '
+  split("\n") | map(select(length > 0) | split("\t") | {name: .[0], realName: (.[1] // "")})
+  | {me: .[0], others: .[1:]}' |
+  jq -c --arg avatar "$avatar" '.me.avatar = $avatar'

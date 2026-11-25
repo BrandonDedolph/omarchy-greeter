@@ -55,6 +55,16 @@ but one use, time-boxed, and you pick the account.
 If you ever enroll a TPM or FIDO key for the disk, the mark stops being made
 automatically. Set `boot_unlock=no` to turn it off.
 
+## Lock screen: who is signed in, switching user
+
+The lock shows your avatar and name with a **Locked** label, chips for other
+accounts that are signed in, and **Switch user**. Switching opens the login
+screen on a new console (SDDM `SwitchToGreeter`) while your session stays
+locked, preselecting the account you clicked. On the login screen each
+account reads **Locked · resumes session** (it has a session running, via
+`omarchy-greeter-presence`) or **Log in**. Logging back into a locked session
+unlocks it in one step when SDDM tells logind to (`omarchy-greeter-session-watch`).
+
 ## Lock screen on the primary monitor
 
 `omarchy-greeter-lock-setup` clones Omarchy's lock plugin and patches it; the

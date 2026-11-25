@@ -1,0 +1,16 @@
+#!/bin/bash
+# Prints "unlock" whenever logind asks this session to unlock: SDDM does that
+# when you log back into a session you switched away from, and so does
+# `loginctl unlock-session`. Only logind can send it (the monitor only
+# accepts signals from org.freedesktop.login1), and logind only does so for
+# this account itself or an admin who authenticated.
+set -uo pipefail
+id=${XDG_SESSION_ID:-}
+[[ -n $id ]] || { echo "omarchy-greeter-session-watch: no XDG_SESSION_ID" >&2; exit 1; }
+path=$(busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
+  org.freedesktop.login1.Manager GetSession s "$id" | awk '{gsub(/"/, "", $2); print $2}')
+[[ $path == /org/freedesktop/login1/session/* ]] || exit 1
+gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path" |
+  while IFS= read -r line; do
+    [[ $line == *"org.freedesktop.login1.Session.Unlock ("* ]] && echo unlock
+  done

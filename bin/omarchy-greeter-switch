@@ -1,0 +1,14 @@
+#!/bin/bash
+# Open the login screen on a new console while this session stays as it is
+# (call it from the lock screen, so it stays locked). With a user name, the
+# login screen opens with that account selected.
+set -euo pipefail
+target=${1:-}
+dir="/var/lib/omarchy-greeter/$(id -un)"
+if [[ -n $target && $target =~ ^[a-z_][a-z0-9_-]*$ && -w $dir ]]; then
+  printf '%s %s\n' "$(date +%s)" "$target" > "$dir/.switch-to.tmp"
+  chmod 644 "$dir/.switch-to.tmp"
+  mv -f "$dir/.switch-to.tmp" "$dir/switch-to"
+fi
+exec busctl --system call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
+  org.freedesktop.DisplayManager.Seat SwitchToGreeter
