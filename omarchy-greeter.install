@@ -1,6 +1,6 @@
 PAM_FILE=/etc/pam.d/sddm
 PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
-USER_UNITS=(omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service)
+USER_UNITS=(omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service omarchy-greeter-lock-check.service)
 SYSTEM_UNITS=(omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service omarchy-greeter-sessions.path)
 
 SESSION_LINE='session     optional    pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'

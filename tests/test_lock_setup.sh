@@ -44,6 +44,37 @@ check "recovers" run --ensure
 check "clone back" test -d "$clone"
 check_not "failure forgotten" test -e "$home/.config/omarchy-greeter/lock-failed"
 
+# --verify: once the shell is up, the lock must answer, or the built-in one
+# comes back. A stand-in shell: pings when $TMP/shell-up exists; the clone
+# answers `lock owner` when $TMP/clone-loads exists; with the clone gone, the
+# built-in lock answers `lock status`.
+cat > "$fake/omarchy-shell" <<SH
+#!/bin/bash
+[[ -e $TMP/shell-up ]] || exit 1
+case "\$*" in
+  "shell ping") exit 0 ;;
+  "lock owner") [[ -d "$clone" && -e $TMP/clone-loads ]] && { echo "omarchy-greeter 1"; exit 0; }; exit 1 ;;
+  "lock status") [[ -d "$clone" ]] && exit 1; echo '{"locked":false}' ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$fake/omarchy-shell"
+verify() { args=(--verify); setup env VERIFY_INTERVAL=0 OMARCHY_GREETER_PATCH="$REPO/lib/patch-lock.py"; }
+check "verify: no shell yet, nothing judged" verify
+check "verify: clone kept without a shell" test -d "$clone"
+touch "$TMP/shell-up" "$TMP/clone-loads"
+check "verify: lock answers" verify
+check "verify: clone kept" test -d "$clone"
+rm -f "$TMP/clone-loads"; : > "$notes"
+check_not "verify: lock does not load" verify
+check_not "verify: clone removed" test -d "$clone"
+check "verify: failure remembered" test -s "$home/.config/omarchy-greeter/lock-failed"
+check "verify: told the built-in lock is back" grep -q "Omarchy's own lock screen is back" "$notes"
+check "verify: not retried at login" run --at-login
+check_not "verify: still on the built-in lock" test -d "$clone"
+rm -f "$TMP/shell-up"
+run >/dev/null   # explicit setup clears the failure and rebuilds
+
 # Package removal: clone gone, shell.json cleaned, its mode kept.
 printf '{"plugins":["omarchy.clock","%s.lock"],"disabledPlugins":["omarchy.lock"],"cloneSourceRestores":["%s.lock"]}\n' $me $me > "$home/.config/omarchy/shell.json"
 chmod 644 "$home/.config/omarchy/shell.json"

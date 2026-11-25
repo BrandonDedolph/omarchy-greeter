@@ -21,6 +21,8 @@
 #   omarchy-greeter-lock-setup --if-changed  rebuild if the lock or patch changed (post-update hook)
 #   omarchy-greeter-lock-setup --at-login    rebuild if changed, before the shell starts; never restarts
 #   omarchy-greeter-lock-setup --remove      go back to the built-in lock (and opt out)
+#   omarchy-greeter-lock-setup --verify      once the shell is up, check the lock answers;
+#                                            if not, put the built-in lock back
 
 set -euo pipefail
 
@@ -86,6 +88,41 @@ if [[ ${1:-} == --uninstall ]]; then
   exit 0
 fi
 
+# A lock that parses can still fail to load (the shell then only logs a
+# warning, and with the built-in lock disabled nothing would lock). So once
+# the shell is up, the lock must answer; if it does not, go back to the
+# built-in lock, restart the shell and check that one answers.
+lock_answers() { [[ $(omarchy-shell lock owner 2>/dev/null) == omarchy-greeter* ]]; }
+stock_answers() { omarchy-shell lock status 2>/dev/null | jq -e 'has("locked")' >/dev/null 2>&1; }
+wait_for() {
+  local tries=$1; shift
+  for (( i = 0; i < tries; i++ )); do "$@" && return 0; sleep "${VERIFY_INTERVAL:-1}"; done
+  return 1
+}
+verify() {
+  ours || return 0
+  # No shell after a minute and a half: nothing to judge (the desktop did not
+  # start), and the next login checks again.
+  wait_for 90 omarchy-shell shell ping || return 0
+  wait_for 20 lock_answers && return 0
+  logger -t omarchy-greeter "the multi-user lock did not load; going back to Omarchy's lock" 2>/dev/null || true
+  mkdir -p "${FAILED%/*}" && stamp > "$FAILED"
+  remove_clone
+  omarchy restart shell >/dev/null 2>&1 || true
+  if wait_for 60 stock_answers; then
+    notify-send -u critical "Lock screen" "The multi-user lock did not load, so Omarchy's own lock screen is back. Backgrounded sessions still lock." 2>/dev/null || true
+  else
+    logger -t omarchy-greeter "Omarchy's lock does not answer either" 2>/dev/null || true
+    notify-send -u critical "Lock screen" "The lock screen is not responding. Log out and back in, then run: omarchy-greeter status" 2>/dev/null || true
+  fi
+  return 1
+}
+
+if [[ ${1:-} == --verify ]]; then
+  verify
+  exit $?
+fi
+
 if [[ ${1:-} == --remove ]]; then
   remove_clone
   rm -f "$OLD_HOOK" "$FAILED"
@@ -112,7 +149,7 @@ case $mode in
     failed_before && exit 0
     ;;
   "") rm -f "$OPTOUT" "$FAILED" ;;
-  *) echo "usage: omarchy-greeter-lock-setup [--ensure|--if-changed|--at-login|--remove]" >&2; exit 2 ;;
+  *) echo "usage: omarchy-greeter-lock-setup [--ensure|--if-changed|--at-login|--remove|--verify]" >&2; exit 2 ;;
 esac
 
 # Swapping the lock while it is up would drop the lock client; try later
@@ -129,6 +166,7 @@ reload_lock() {
   [[ $mode == --at-login ]] && return 0
   shell_running || return 0     # not running: it loads the clone when it starts
   omarchy restart shell >/dev/null 2>&1 || true
+  verify || exit 1
 }
 
 give_up() {

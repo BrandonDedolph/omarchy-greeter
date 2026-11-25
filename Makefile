@@ -10,6 +10,7 @@ install:
 	install -Dm755 bin/omarchy-greeter-guard "$(DESTDIR)/usr/bin/omarchy-greeter-guard"
 	install -Dm755 bin/omarchy-greeter "$(DESTDIR)/usr/bin/omarchy-greeter"
 	install -Dm644 systemd/user/omarchy-greeter-guard.service "$(DESTDIR)/usr/lib/systemd/user/omarchy-greeter-guard.service"
+	install -Dm644 systemd/user/omarchy-greeter-lock-check.service "$(DESTDIR)/usr/lib/systemd/user/omarchy-greeter-lock-check.service"
 	install -Dm644 systemd/user/omarchy-greeter-lock-update.service "$(DESTDIR)/usr/lib/systemd/user/omarchy-greeter-lock-update.service"
 	install -Dm755 bin/omarchy-greeter-sessions "$(DESTDIR)/usr/bin/omarchy-greeter-sessions"
 	install -Dm755 bin/omarchy-greeter-switch "$(DESTDIR)/usr/bin/omarchy-greeter-switch"
