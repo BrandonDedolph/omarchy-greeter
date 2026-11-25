@@ -15,6 +15,10 @@ Item {
   property string incoming: ""
   property real progress: 1
   property bool finishing: false
+  // Off: changes show at once (no fade or reveal), e.g. while loading.
+  property bool animate: true
+  // The current picture is on screen (or there is none to wait for).
+  readonly property bool ready: shown === "" ? source === "" : (base.status === Image.Ready || base.status === Image.Error)
 
   function settle() {
     if (finishing && base.status === Image.Ready && String(base.source) === shown) {
@@ -24,6 +28,13 @@ Item {
   }
 
   onSourceChanged: {
+    if (!animate) {
+      reveal.stop()
+      incoming = ""
+      progress = 1
+      shown = source
+      return
+    }
     if (reveal.running) {
       reveal.stop()
       shown = incoming
@@ -47,7 +58,7 @@ Item {
   Rectangle {
     anchors.fill: parent
     color: bg.fallbackColor
-    Behavior on color { ColorAnimation { duration: 600 } }
+    Behavior on color { enabled: bg.animate; ColorAnimation { duration: 600 } }
   }
 
   Image {
@@ -60,7 +71,7 @@ Item {
     cache: true
     smooth: true
     opacity: status === Image.Ready ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
+    Behavior on opacity { enabled: bg.animate; NumberAnimation { duration: 700; easing.type: Easing.OutCubic } }
     onStatusChanged: bg.settle()
   }
 

@@ -26,6 +26,7 @@ Window {
     onPasswordTextEdited: function(password) { win.note("edited:" + password); view.passwordText = password }
     onSubmitPassword: function(password) { win.note("submit:" + password) }
     onSwitchUserRequested: function(name) { win.note("switch:" + name) }
+    onPowerRequested: function(action) { win.note("power:" + action) }
   }
 
   Timer {
@@ -41,10 +42,7 @@ Window {
         l.pw.submitted()
         console.warn("harness: rows=" + (l.accountRows ? l.accountRows.length : -1))
         l.switchUserRequested("sam")
-        view.handingOff = true
-        console.warn("harness: handoff-form=" + l.pw.visible)
-        view.handingOff = false
-        console.warn("harness: after-form=" + l.pw.visible)
+        l.powerRequested("suspend")
       }
       console.warn("harness: events=" + win.events.join(","))
       var shot = Qt.application.arguments[Qt.application.arguments.length - 1]

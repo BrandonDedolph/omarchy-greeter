@@ -60,17 +60,12 @@ og monitor 'DP-1' >/dev/null
 equal "monitor by name" "/usr/bin/omarchy-greeter _set primary DP-1" "$(cat "$asked")"
 
 : > "$asked"
-og lock-to-login off >/dev/null
-equal "lock-to-login off" "/usr/bin/omarchy-greeter _set lock_to_login no" "$(cat "$asked")"
-: > "$asked"
 og screen-off 5 >/dev/null
 equal "screen-off has a floor" "/usr/bin/omarchy-greeter _set screen_off 15" "$(cat "$asked")"
 check_not "screen-off takes a number" og screen-off soon
-printf 'lock_to_login=no\nscreen_off=0\n' > "$conf"
-equal "lock-to-login reads off" "off" "$(og lock-to-login)"
+printf 'screen_off=0\n' > "$conf"
 equal "status: screen never off" "Login screen display off:    never" "$(og status | grep 'display off')"
 : > "$conf"
-equal "lock-to-login on by default" "on" "$(og lock-to-login)"
 equal "screen off after 120s by default" "120" "$(og screen-off)"
 
 # ---- root steps refuse to run unprivileged -------------------------------

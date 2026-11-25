@@ -17,7 +17,7 @@ install:
 	install -Dm755 bin/omarchy-greeter-session-watch "$(DESTDIR)/usr/bin/omarchy-greeter-session-watch"
 	install -Dm644 lib/patch-lock.py "$(DESTDIR)/usr/lib/omarchy-greeter/patch-lock.py"
 	install -Dm644 lock/GreeterLockView.qml "$(DESTDIR)/usr/lib/omarchy-greeter/lock-ui/GreeterLockView.qml"
-	for f in AccountForm AccountList PasswordBox FocusRing FormStyle UserAvatar; do \
+	for f in AccountForm AccountList PasswordBox FocusRing FormStyle UserAvatar PowerButton; do \
 		install -Dm644 "theme/$$f.qml" "$(DESTDIR)/usr/lib/omarchy-greeter/lock-ui/$$f.qml"; \
 	done
 	install -Dm755 lib/prepare-dirs "$(DESTDIR)/usr/lib/omarchy-greeter/prepare-dirs"

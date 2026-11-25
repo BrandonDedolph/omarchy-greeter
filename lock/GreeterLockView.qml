@@ -3,9 +3,11 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 
-// omarchy-greeter's lock layout: the same Windows-style form as the login
-// screen (AccountForm.qml, shared), every account bottom-left, and the
-// account's pre-blurred background.
+// omarchy-greeter's lock layout: the same screen as the login screen, as on
+// Windows, where the lock screen is where you sign back in. The shared form
+// (AccountForm.qml), every account bottom-left (choosing another one opens
+// the login screen with it selected), the machine top-left, Sleep / Restart /
+// Shut down bottom-right, and the account's pre-blurred background.
 //
 // It is loaded by the generated LockView.qml (see lib/patch-lock.py), which
 // takes whatever Omarchy's lock logic passes in and forwards what this file
@@ -44,12 +46,8 @@ Item {
   // Off on the black monitors, where the form is invisible but typing still
   // reaches the password field: nothing hidden may be clickable there.
   property bool extrasEnabled: true
-  // Locking is opening the login screen: show only the background and clock
-  // so the form appears once, there. Turns off if the login screen does not
-  // take over.
-  property bool handingOff: false
-  onHandingOffChanged: if (!handingOff && inputEnabled) Qt.callLater(forcePasswordFocus)
   signal switchUserRequested(string name)
+  signal powerRequested(string action)      // suspend, reboot or poweroff
 
   property date now: new Date()
   readonly property string me: currentUser && currentUser.name ? String(currentUser.name) : ""
@@ -180,8 +178,6 @@ Item {
       asynchronous: true
       cache: true
       smooth: true
-      opacity: status === Image.Ready ? 1 : 0
-      Behavior on opacity { NumberAnimation { duration: 250 } }
     }
 
     Image {
@@ -244,7 +240,6 @@ Item {
     AccountForm {
       id: form
       st: formStyle
-      visible: !root.handingOff
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.verticalCenter: parent.verticalCenter
       anchors.verticalCenterOffset: parent.height * 0.03
@@ -266,6 +261,57 @@ Item {
       passwordBox.inputEnabled: root.inputEnabled
     }
 
+    // ---- machine, top-left; power, bottom-right ------------------------------
+
+    FileView {
+      id: hostFile
+      path: "/etc/hostname"
+      blockLoading: true
+      printErrors: false
+    }
+    Text {
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.margins: 28 * formStyle.ui
+      readonly property string host: String(hostFile.text() || "").trim()
+      visible: root.extrasEnabled && host !== ""
+      textFormat: Text.PlainText
+      text: "\uf108  " + host
+      color: formStyle.alpha(formStyle.bright, 0.8)
+      font.family: formStyle.fontFamily
+      font.pixelSize: 14 * formStyle.ui
+    }
+
+    Row {
+      id: powerRow
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      anchors.margins: 28 * formStyle.ui
+      spacing: 8 * formStyle.ui
+      visible: root.extrasEnabled
+      enabled: root.extrasEnabled
+
+      PowerButton {
+        st: formStyle
+        glyph: "\u{f04b2}"
+        label: "Sleep"
+        onClicked: { root.wakeRequested(); root.powerRequested("suspend") }
+      }
+      PowerButton {
+        st: formStyle
+        glyph: "\u{f0709}"
+        label: "Restart"
+        onClicked: root.powerRequested("reboot")
+      }
+      PowerButton {
+        st: formStyle
+        glyph: "\u{f0425}"
+        label: "Shut down"
+        hoverInk: formStyle.error
+        onClicked: root.powerRequested("poweroff")
+      }
+    }
+
     // ---- accounts, bottom-left ---------------------------------------------
 
     // Every account the login screen offers; choosing another one opens the
@@ -273,7 +319,7 @@ Item {
     AccountList {
       id: accountList
       st: formStyle
-      visible: root.extrasEnabled && !root.handingOff && root.accountRows.length > 1
+      visible: root.extrasEnabled && root.accountRows.length > 1
       enabled: root.extrasEnabled
       anchors.left: parent.left
       anchors.bottom: parent.bottom

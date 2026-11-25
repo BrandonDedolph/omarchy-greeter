@@ -141,57 +141,18 @@ rep("Service.qml", '''  property string pendingPassword: ""
     Quickshell.execDetached(["omarchy-greeter-switch"].concat(name ? [name] : []))
   }
 
-  // Locking opens the login screen with this account selected, like
-  // Windows: one screen for locking and signing in (lock_to_login in
-  // /etc/omarchy-greeter.conf, on unless "no"). This lock stays up
-  // underneath, so if the login screen does not come up, this is what shows.
-  // Not for a lock of a session already out of sight, the lock a shell
-  // restart puts back (it comes up within the first seconds), or one a
-  // logind unlock is about to lift. A lock you start always opens it.
-  readonly property bool lockToLogin: {
-    var m = String(greeterSettings.text() || "").match(/^\\s*lock_to_login\\s*=\\s*(\\w*)/m)
-    return !m || m[1] !== "no"
-  }
-  // While handing over, the lock shows only the background and clock (no
-  // form), so the form appears once, on the login screen, instead of twice.
-  // Decided when the lock is requested, so even its first frame has no form.
-  // If the login screen has not taken over after a few seconds, or this
-  // session comes back to the front still locked, the form shows.
-  property bool handingOff: false
-  function startHandoff() {
-    root.handingOff = root.lockRequested && root.lockToLogin && root.sessionActive
-      && Date.now() - root.shellStartedAt >= 3000 && !root.logindUnlockPending()
-    if (root.handingOff) handoffTimer.restart()
-  }
-  Timer {
-    id: handoffTimer
-    interval: 4000
-    onTriggered: if (root.sessionActive) root.handingOff = false
-  }
-  // Back in front: a logind unlock (the usual way back) lifts the lock within
-  // moments; only if it does not, show the form.
-  Timer {
-    id: revealTimer
-    interval: 1500
-    onTriggered: if (root.sessionActive) root.handingOff = false
-  }
-  function maybeOpenLogin() {
-    if (!root.handingOff || !sessionLock.locked || !root.sessionActive) return
-    openLoginTimer.restart()
-  }
-  Connections {
-    target: sessionLock
-    function onLockStateChanged() { root.maybeOpenLogin() }
-  }
-  // A moment for the lock's first frame, so the switch never shows the desktop.
-  Timer {
-    id: openLoginTimer
-    interval: 300
-    onTriggered: {
-      if (!sessionLock.locked || !root.sessionActive || root.logindUnlockPending()) return
-      root.logEvent("lock: opening the login screen")
-      root.switchUser(root.userName)
+  // Sleep, Restart and Shut down from the lock screen, as on the login
+  // screen. Restart and Shut down go through Omarchy, which closes this
+  // session's apps first.
+  function requestPower(action) {
+    var commands = {
+      suspend: ["systemctl", "suspend"],
+      reboot: ["omarchy-system", "reboot"],
+      poweroff: ["omarchy-system", "shutdown"]
     }
+    if (!commands[action]) return
+    root.logEvent("power " + action)
+    Quickshell.execDetached(commands[action])
   }
 
   // Session state from logind (omarchy-greeter-session-watch):
@@ -223,7 +184,6 @@ rep("Service.qml", '''  property string pendingPassword: ""
   function handleSessionEvent(event) {
     if (event === "active") {
       root.sessionActive = true
-      if (root.handingOff) revealTimer.restart()
       if (root.lockRequested && root.fingerprintConfigured) {
         root.resumeFingerprint()
         Qt.callLater(root.startFingerprint)
@@ -303,7 +263,6 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // replayed unlock is for).
   onLockRequestedChanged: {
     if (!root.lockRequested || !root.justStarted()) root.forgetLogindUnlock()
-    root.startHandoff()
   }
 
   Process {
@@ -348,8 +307,8 @@ rep("Service.qml", '''      color: Commons.Color.background
         otherUsers: root.otherUsers
         accounts: root.accounts
         avatarPath: root.avatarPath
-        handingOff: root.handingOff
         onSwitchUserRequested: function(name) { root.switchUser(name) }
+        onPowerRequested: function(action) { root.requestPower(action) }
 ''')
 rep("Service.qml", '''        loadBackground: root.locked
 ''', '''        loadBackground: root.locked && root.isPrimaryOutput(lockSurface.screen)
@@ -367,7 +326,7 @@ rep("Service.qml", '''      inputEnabled: false
 # ------------------------------------------------------------------ the layout
 
 UI_FILES = ["GreeterLockView.qml", "AccountForm.qml", "AccountList.qml", "PasswordBox.qml",
-            "FocusRing.qml", "FormStyle.qml", "UserAvatar.qml"]
+            "FocusRing.qml", "FormStyle.qml", "UserAvatar.qml", "PowerButton.qml"]
 
 ui = {}
 for name in UI_FILES:
@@ -395,8 +354,8 @@ if not any(n == "passwordText" for _, n, _ in props) or not any(n == "submitPass
     raise SystemExit("LockView.qml: its interface no longer looks like a lock layout")
 
 OURS_PROPS = [("var", "currentUser", "({})"), ("var", "otherUsers", "[]"), ("var", "accounts", "[]"),
-              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true"), ("bool", "handingOff", "false")]
-OURS_SIGNALS = [("switchUserRequested", "(string name)")]
+              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true")]
+OURS_SIGNALS = [("switchUserRequested", "(string name)"), ("powerRequested", "(string action)")]
 known = {n for _, n, _ in props}
 props += [p for p in OURS_PROPS if p[1] not in known]
 known_signals = {n for n, _ in signals}

@@ -88,7 +88,7 @@ Rectangle {
   }
   readonly property real fontBase: Number(display.fontBaseSize) > 0 ? Math.min(Math.max(Number(display.fontBaseSize), 7), 24) : 12
   property real ui: userScale / Math.max(Screen.devicePixelRatio, 0.5) * fontBase / 12
-  Behavior on ui { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+  Behavior on ui { enabled: root.settled; NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
   readonly property string fontFamily: display.fontFamily ? String(display.fontFamily) : "JetBrainsMono Nerd Font"
 
   // ---- users -------------------------------------------------------------
@@ -210,16 +210,46 @@ Rectangle {
 
   function readText(path, done) {
     var xhr = new XMLHttpRequest()
+    var finished = false
+    function finish(text) {
+      if (finished) return
+      finished = true
+      done(text)          // reads it starts count before this one ends
+      root.pendingReads--
+      Qt.callLater(root.trySettle)
+    }
+    root.pendingReads++
     xhr.onreadystatechange = function() {
-      if (xhr.readyState === XMLHttpRequest.DONE) done(xhr.status === 200 || xhr.status === 0 ? String(xhr.responseText || "") : "")
+      if (xhr.readyState === XMLHttpRequest.DONE) finish(xhr.status === 200 || xhr.status === 0 ? String(xhr.responseText || "") : "")
     }
     try {
       xhr.open("GET", fileUrl(path))
       xhr.send()
     } catch (e) {
-      done("")
+      finish("")
     }
   }
+
+  // ---- showing up --------------------------------------------------------
+  //
+  // Black until the selected account's look (colors, size, background) is
+  // loaded, then shown in one step: nothing visibly loads or re-lays out.
+  // Opened from a lock screen's Switch user, it appears at once, so it reads
+  // as the same screen changing account; otherwise (at boot) it settles in
+  // gently. At most 1.5s of black, whatever is still loading.
+  property int pendingReads: 0
+  property bool settled: false
+  property bool quiet: false
+  function trySettle() {
+    if (settled || pendingReads > 0 || users.length === 0 || !background.ready) return
+    settle()
+  }
+  function settle() {
+    if (settled) return
+    quiet = requestedStamp > 0
+    settled = true
+  }
+  Timer { interval: 1500; running: true; onTriggered: root.settle() }
 
   function parseColors(text) {
     var out = {}
@@ -293,14 +323,14 @@ Rectangle {
   property color cAccent: pick("accent", "#7aa2f7")
   property color cError: pick("red", "#f7768e")
   property color cWarn: pick("yellow", "#e0af68")
-  Behavior on cBackground { ColorAnimation { duration: 600 } }
-  Behavior on cSurface { ColorAnimation { duration: 600 } }
-  Behavior on cForeground { ColorAnimation { duration: 600 } }
-  Behavior on cBright { ColorAnimation { duration: 600 } }
-  Behavior on cMuted { ColorAnimation { duration: 600 } }
-  Behavior on cAccent { ColorAnimation { duration: 600 } }
-  Behavior on cError { ColorAnimation { duration: 600 } }
-  Behavior on cWarn { ColorAnimation { duration: 600 } }
+  Behavior on cBackground { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cSurface { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cForeground { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cBright { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cMuted { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cAccent { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cError { enabled: root.settled; ColorAnimation { duration: 600 } }
+  Behavior on cWarn { enabled: root.settled; ColorAnimation { duration: 600 } }
 
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
 
@@ -382,11 +412,9 @@ Rectangle {
     id: scene
     anchors.fill: parent
 
-    // A gentle settle on first show.
-    scale: entered ? 1.0 : 1.04
-    property bool entered: false
-    Behavior on scale { NumberAnimation { duration: 1600; easing.type: Easing.OutCubic } }
-    Component.onCompleted: entered = true
+    // A gentle settle on first show (not after Switch user).
+    scale: root.settled ? 1.0 : 1.04
+    Behavior on scale { enabled: !root.quiet; NumberAnimation { duration: 1600; easing.type: Easing.OutCubic } }
 
     // The account's background, blurred ahead of time (sharp if it has no
     // blurred copy yet).
@@ -395,6 +423,8 @@ Rectangle {
       anchors.fill: parent
       source: root.showsUi && root.look ? (root.look.blur || root.look.background || "") : ""
       fallbackColor: root.cBackground
+      animate: root.settled
+      onReadyChanged: root.trySettle()
       decodeSize: Qt.size(Math.ceil(root.width * Screen.devicePixelRatio), Math.ceil(root.height * Screen.devicePixelRatio))
     }
 
@@ -424,9 +454,8 @@ Rectangle {
     anchors.top: parent.top
     anchors.topMargin: root.height * 0.08
     spacing: 2 * root.ui
-    opacity: 0
-    Component.onCompleted: opacity = 1
-    Behavior on opacity { NumberAnimation { duration: 900 } }
+    opacity: root.settled ? 1 : 0
+    Behavior on opacity { enabled: !root.quiet; NumberAnimation { duration: 900 } }
 
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
@@ -453,9 +482,8 @@ Rectangle {
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.verticalCenter: parent.verticalCenter
     anchors.verticalCenterOffset: root.height * 0.03
-    opacity: 0
-    Component.onCompleted: opacity = 1
-    Behavior on opacity { NumberAnimation { duration: 700 } }
+    opacity: root.settled ? 1 : 0
+    Behavior on opacity { enabled: !root.quiet; NumberAnimation { duration: 700 } }
 
     displayName: root.user ? (root.user.realName || root.user.name) : ""
     userName: root.userName
@@ -562,6 +590,13 @@ Rectangle {
       hoverInk: root.cError
       onClicked: sddm.powerOff()
     }
+  }
+
+  // Black until settled (see "showing up").
+  Rectangle {
+    anchors.fill: parent
+    color: "#000000"
+    visible: !root.settled
   }
 
   // Non-primary monitors: plain black over everything, swallowing clicks.
