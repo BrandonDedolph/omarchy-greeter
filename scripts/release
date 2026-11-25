@@ -29,14 +29,19 @@ NAMESPACE=omarchy-greeter-release
 step() { printf '\n\e[1m==> %s\e[0m\n' "$*"; }
 die() { echo "release: $*" >&2; exit 1; }
 
-# sign <file>: writes <file>.sshsig and checks it against keys/allowed_signers.
-# Not <file>.sig: pacman takes that, beside a package, for a PGP signature.
+# sign <file>...: writes <file>.sshsig for each and checks it against
+# keys/allowed_signers. One ssh-keygen run signs them all, so 1Password asks
+# once per release. Not <file>.sig: pacman takes that, beside a package, for
+# a PGP signature.
 sign() {
-  rm -f "$1.sig" "$1.sshsig"
-  SSH_AUTH_SOCK=$AGENT ssh-keygen -q -Y sign -f "$SIGNING_KEY" -n "$NAMESPACE" "$1" || { echo "release: signing $1 failed" >&2; return 1; }
-  mv -f "$1.sig" "$1.sshsig"
-  ssh-keygen -Y verify -f keys/allowed_signers -I "$NAMESPACE" -n "$NAMESPACE" -s "$1.sshsig" < "$1" >/dev/null ||
-    { echo "release: the signature for $1 does not verify against keys/allowed_signers" >&2; return 1; }
+  local f
+  for f in "$@"; do rm -f "$f.sig" "$f.sshsig"; done
+  SSH_AUTH_SOCK=$AGENT ssh-keygen -q -Y sign -f "$SIGNING_KEY" -n "$NAMESPACE" "$@" || { echo "release: signing failed" >&2; return 1; }
+  for f in "$@"; do
+    mv -f "$f.sig" "$f.sshsig"
+    ssh-keygen -Y verify -f keys/allowed_signers -I "$NAMESPACE" -n "$NAMESPACE" -s "$f.sshsig" < "$f" >/dev/null ||
+      { echo "release: the signature for $f does not verify against keys/allowed_signers" >&2; return 1; }
+  done
 }
 
 # ---- AUR (later) --------------------------------------------------------
@@ -125,9 +130,8 @@ pkg="$build/omarchy-greeter-$version-1-any.pkg.tar.zst"
 [[ -f $pkg ]] || die "expected $pkg"
 sed "s|@ALLOWED_SIGNERS@|$(grep -v '^#' keys/allowed_signers | head -n1)|" scripts/install.sh > "$build/install.sh"
 
-step "Signing (approve in 1Password)"
-sign "$pkg" || { undo; exit 1; }
-sign "$build/install.sh" || { undo; exit 1; }
+step "Signing (approve once in 1Password)"
+sign "$pkg" "$build/install.sh" || { undo; exit 1; }
 # What users run: pacman must accept the package as downloaded, signature beside it.
 pacman -U --print "$pkg" >/dev/null || { undo; die "pacman does not accept the package"; }
 
