@@ -46,7 +46,7 @@ allowed=$(conf_value boot_unlock)
 [[ $allowed =~ ^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$ ]] || off "boot_unlock is not a list of account names"
 
 uptime=$(cut -d. -f1 /proc/uptime)
-[[ $uptime =~ ^[0-9]+$ ]] && (( uptime < 300 )) || off "not a fresh boot (uptime ${uptime}s)"
+{ [[ $uptime =~ ^[0-9]+$ ]] && (( uptime < 300 )); } || off "not a fresh boot (uptime ${uptime}s)"
 
 # SDDM autologin (Omarchy sets one up for some installs).
 # Read in SDDM's order: /etc/sddm.conf has the last word.
@@ -73,6 +73,7 @@ bundled=$(
   set +eu
   FILES=()
   for f in /etc/mkinitcpio.conf /etc/mkinitcpio.conf.d/*.conf; do
+    # shellcheck disable=SC1090  # mkinitcpio's own configs, read as mkinitcpio does
     [[ -f $f ]] && source "$f" >/dev/null 2>&1 < /dev/null
   done
   printf 'ok:%s' "${FILES[*]}" | tr -d '[:space:]'

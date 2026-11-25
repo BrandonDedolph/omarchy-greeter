@@ -10,10 +10,13 @@
 FLAG=/run/omarchy-greeter/boot-unlocked
 HINT=/run/omarchy-greeter/boot-unlock-hint
 
-if [[ ${PAM_TYPE:-} == open_session ]]; then
-  [[ ${PAM_SERVICE:-} == sddm || ${PAM_SERVICE:-} == sddm-autologin ]] && rm -f "$FLAG" "$HINT"
-  exit 0
-fi
+case ${PAM_TYPE:-} in
+  open_session)
+    [[ ${PAM_SERVICE:-} == sddm || ${PAM_SERVICE:-} == sddm-autologin ]] && rm -f "$FLAG" "$HINT"
+    exit 0
+    ;;
+  close_session) exit 0 ;;
+esac
 
 [[ ${PAM_TYPE:-} == auth && ${PAM_SERVICE:-} == sddm ]] || exit 1
 user=${PAM_USER:-}

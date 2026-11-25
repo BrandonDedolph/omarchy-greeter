@@ -10,7 +10,6 @@
 #     (publish-view), and watches the folder for later changes.
 set -uo pipefail
 ROOT=/var/lib/omarchy-greeter
-LIB=/usr/lib/omarchy-greeter
 install -d -m 755 -o root -g root "$ROOT"
 
 read -r uid_min uid_max < <(awk '/^UID_MIN/{a=$2} /^UID_MAX/{b=$2} END{print (a?a:1000), (b?b:60000)}' /etc/login.defs)

@@ -26,11 +26,15 @@
 # The Omarchy menu:
 #   omarchy-greeter menu [install|remove]       Setup > Login & Lock in the Omarchy menu
 #
+#   omarchy-greeter --version
+#
 # With no argument after a setting, prints its current value.
 
 set -euo pipefail
 
 CONF=/etc/omarchy-greeter.conf
+# Tests read a sample config; never as root (root steps always use /etc).
+if (( EUID != 0 )) && [[ -n ${OMARCHY_GREETER_CONF:-} ]]; then CONF=$OMARCHY_GREETER_CONF; fi
 DATA=/var/lib/omarchy-greeter
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter"
 NO_PUBLISH="$USER_CONF/no-publish"
@@ -72,8 +76,8 @@ root_set() {  # root_set <key> <value>, only the known keys and values
     *) die "unknown setting: $key" ;;
   esac
   [[ -f $CONF && ! -L $CONF ]] || install -m 644 /dev/null "$CONF"
-  if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
-    sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key=$value|" "$CONF"
+  if grep -qE "^[[:space:]]*${key}[[:space:]]*=" "$CONF"; then
+    sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${value}|" "$CONF"
   else
     printf '%s=%s\n' "$key" "$value" >> "$CONF"
   fi
@@ -258,7 +262,7 @@ cmd_user_admin() {
 root_user_admin() {
   (( EUID == 0 )) || die "must run as root"
   local name=$1 want=$2 other admins=0
-  valid_name "$name" && getent passwd "$name" >/dev/null || die "no account named $name"
+  { valid_name "$name" && getent passwd "$name" >/dev/null; } || die "no account named $name"
   if [[ $want == "on" ]]; then
     usermod -aG wheel "$name"
     echo "$name now has admin rights (takes effect at its next login)."
@@ -322,8 +326,6 @@ cmd_menu() {
   # An empty object on one line has no line to insert after.
   [[ $(tr -d '[:space:]' < "$MENU_FILE") == "{}" ]] && printf '{\n}\n' > "$MENU_FILE"
   tmp=$(mktemp "$MENU_FILE.XXXXXX")
-  # mktemp makes it 0600; keep the file's own mode.
-  chmod --reference="$MENU_FILE" "$tmp"
   # Drop the old block, then (for install) put the new one right after the
   # opening brace: every entry ends with a comma, which JSONC allows before
   # whatever follows.
@@ -336,6 +338,8 @@ cmd_menu() {
     grep -qF "$MENU_BEGIN" "$tmp.2" || { rm -f "$tmp" "$tmp.2"; die "could not find the opening { in $MENU_FILE"; }
     mv -f "$tmp.2" "$tmp"
   fi
+  # The temp files have their own modes; keep the file's.
+  chmod --reference="$MENU_FILE" "$tmp"
   mv -f "$tmp" "$MENU_FILE"
   [[ $mode == "install" ]] && echo "Added Setup > Login & Lock to the Omarchy menu." || echo "Removed Login & Lock from the Omarchy menu."
 }
@@ -505,6 +509,7 @@ case ${1:-status} in
   _install) shift; root_install "$@" ;;
   _user-add) shift; root_user_add "$@" ;;
   _user-admin) shift; root_user_admin "$@" ;;
+  -V|--version|version) echo "omarchy-greeter $(pacman -Q omarchy-greeter 2>/dev/null | awk '{print $2}' | grep . || echo '(not installed as a package)')" ;;
   -h|--help|help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) die "unknown command: $1 (see omarchy-greeter --help)" ;;
 esac

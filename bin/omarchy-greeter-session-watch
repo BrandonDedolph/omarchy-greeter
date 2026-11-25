@@ -29,6 +29,7 @@ state() {
 # Start watching before reading the current state, so no change slips between.
 parent=$PPID
 coproc MONITOR { exec stdbuf -oL gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path"; }
+# shellcheck disable=SC2153  # MONITOR_PID is set by coproc
 monitor_pid=$MONITOR_PID
 # Never outlive the shell that started us, nor leave the monitor behind.
 trap 'kill "$monitor_pid" 2>/dev/null' EXIT

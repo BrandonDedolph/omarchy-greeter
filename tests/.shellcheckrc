@@ -1,0 +1,5 @@
+# Test scripts source tests/lib.sh and, in one case, the install file.
+source-path=SCRIPTDIR
+external-sources=true
+# Literal $ in grep patterns; ls in a folder the test made; names set by sourced files.
+disable=SC2016,SC2012,SC2153

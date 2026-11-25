@@ -1,6 +1,6 @@
 PAM_FILE=/etc/pam.d/sddm
 PAM_LINE='auth        [success=done default=ignore] pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
-USER_UNITS='omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service'
+USER_UNITS=(omarchy-greeter-sync.path omarchy-greeter-sync.service omarchy-greeter-presence.service omarchy-greeter-guard.service omarchy-greeter-lock-update.service)
 
 SESSION_LINE='session     optional    pam_exec.so quiet /usr/lib/omarchy-greeter/boot-unlock-auth'
 
@@ -41,7 +41,7 @@ for_each_account() {
 post_install() {
   systemctl daemon-reload
   systemctl enable omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service
-  systemctl --global enable $USER_UNITS
+  systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
   # Publish and check every account's look now, not just at next boot.
   systemctl start omarchy-greeter-dirs.service || true
@@ -50,7 +50,7 @@ post_install() {
 
 post_upgrade() {
   systemctl daemon-reload
-  systemctl --global enable $USER_UNITS
+  systemctl --global enable "${USER_UNITS[@]}"
   add_pam_line
   systemctl restart omarchy-greeter-dirs.service || true
   if grep -qE '^[[:space:]]*boot_unlock[[:space:]]*=[[:space:]]*yes' /etc/omarchy-greeter.conf 2>/dev/null; then
@@ -62,14 +62,16 @@ pre_remove() {
   # Take the Setup > Login & Lock rows out of every account's Omarchy menu,
   # the update hook, and put Omarchy's own lock screen back.
   for_each_account /usr/bin/omarchy-greeter menu purge
+  # shellcheck disable=SC2016  # $HOME expands in the account's own shell
   for_each_account sh -c 'rm -f "$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter" "$HOME/.config/omarchy/hooks/post-update.d/omarchy-greeter-lock"'
   for_each_account /usr/bin/omarchy-greeter-lock-setup --uninstall
   remove_pam_line
-  local units
-  units=$(systemctl list-units --plain --no-legend --all 'omarchy-greeter-view@*' 2>/dev/null | awk '{print $1}')
-  systemctl stop $units 2>/dev/null || true
+  local units=()
+  mapfile -t units < <(systemctl list-units --plain --no-legend --all 'omarchy-greeter-view@*' 2>/dev/null | awk '{print $1}')
+  (( ${#units[@]} )) && systemctl stop "${units[@]}" 2>/dev/null
+  true
   systemctl disable --now omarchy-greeter-dirs.service omarchy-greeter-boot-unlock.service || true
-  systemctl --global disable $USER_UNITS || true
+  systemctl --global disable "${USER_UNITS[@]}" || true
   rm -f /run/omarchy-greeter/boot-unlocked
 }
 

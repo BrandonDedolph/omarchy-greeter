@@ -48,6 +48,8 @@ info=$(bsdtar -xOf "$file" .PKGINFO)
   die "the signed package is not omarchy-greeter $version; not installing"
 echo "Signature verified."
 
+# The terminal, not the pipe this script arrived on, answers sudo.
+# shellcheck disable=SC2024
 sudo pacman -U --noconfirm "$file" < /dev/tty
 cat <<'EOF'
 
