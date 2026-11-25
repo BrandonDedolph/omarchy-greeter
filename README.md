@@ -23,11 +23,13 @@ A multi-user login screen and lock screen for [Omarchy](https://omarchy.org). Fo
 
 ## Install
 
+From the [AUR](https://aur.archlinux.org/packages/omarchy-greeter):
+
 ```bash
-git clone https://github.com/BrandonDedolph/omarchy-greeter.git
-cd omarchy-greeter
-makepkg -si
+omarchy pkg aur add omarchy-greeter
 ```
+
+(or `yay -S omarchy-greeter`). To build from source instead: `git clone https://github.com/BrandonDedolph/omarchy-greeter.git && cd omarchy-greeter && makepkg -si`.
 
 Then log out once (or reboot). At your next login the package:
 
@@ -38,6 +40,12 @@ Then log out once (or reboot). At your next login the package:
 Every other account gets the same at its own first login. The login screen reads every account's look at boot, so an account shows its own theme even when it is not signed in (a brand-new account shows the default look until its first login).
 
 To pick the monitor for the login and lock forms, open **Setup > Login & Lock > Monitor > This One** on the monitor you want, or run `omarchy-greeter monitor focused`.
+
+## Updates
+
+Installed from the AUR, omarchy-greeter updates along with everything else when you run `omarchy update` (or `yay`). To see whether an update is waiting: `yay -Qua`. Releases and their notes are on the [releases page](https://github.com/BrandonDedolph/omarchy-greeter/releases).
+
+An update takes effect at your next login; it never reloads your desktop in the middle of your work.
 
 ## Adding another person
 
@@ -111,6 +119,10 @@ Test the login screen without logging out:
 QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
   sddm-greeter-qt6 --test-mode --theme /usr/share/sddm/themes/omarchy-greeter
 ```
+
+`make check` runs the syntax checks.
+
+To release a version (maintainers): `scripts/release 3.1.0`. It checks the tree, tags `v3.1.0`, creates the GitHub release, builds and test-installs the AUR package from that release, and pushes it to the AUR, after which users get it through `omarchy update`.
 
 For screenshots without real account names, add `demoUsers=alex:Alex Rivera,sam:Sam Chen` (and optionally `demoHost=`) to a copy of `theme.conf`, with `dataDir=` pointing at sample looks.
 
