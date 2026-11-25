@@ -44,6 +44,11 @@ Item {
   // Off on the black monitors, where the form is invisible but typing still
   // reaches the password field: nothing hidden may be clickable there.
   property bool extrasEnabled: true
+  // Locking is opening the login screen: show only the background and clock
+  // so the form appears once, there. Turns off if the login screen does not
+  // take over.
+  property bool handingOff: false
+  onHandingOffChanged: if (!handingOff && inputEnabled) Qt.callLater(forcePasswordFocus)
   signal switchUserRequested(string name)
 
   property date now: new Date()
@@ -239,6 +244,7 @@ Item {
     AccountForm {
       id: form
       st: formStyle
+      visible: !root.handingOff
       anchors.horizontalCenter: parent.horizontalCenter
       anchors.verticalCenter: parent.verticalCenter
       anchors.verticalCenterOffset: parent.height * 0.03
@@ -267,7 +273,7 @@ Item {
     AccountList {
       id: accountList
       st: formStyle
-      visible: root.extrasEnabled && root.accountRows.length > 1
+      visible: root.extrasEnabled && !root.handingOff && root.accountRows.length > 1
       enabled: root.extrasEnabled
       anchors.left: parent.left
       anchors.bottom: parent.bottom

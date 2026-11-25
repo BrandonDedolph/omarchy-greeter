@@ -152,9 +152,31 @@ rep("Service.qml", '''  property string pendingPassword: ""
     var m = String(greeterSettings.text() || "").match(/^\\s*lock_to_login\\s*=\\s*(\\w*)/m)
     return !m || m[1] !== "no"
   }
+  // While handing over, the lock shows only the background and clock (no
+  // form), so the form appears once, on the login screen, instead of twice.
+  // Decided when the lock is requested, so even its first frame has no form.
+  // If the login screen has not taken over after a few seconds, or this
+  // session comes back to the front still locked, the form shows.
+  property bool handingOff: false
+  function startHandoff() {
+    root.handingOff = root.lockRequested && root.lockToLogin && root.sessionActive
+      && Date.now() - root.shellStartedAt >= 3000 && !root.logindUnlockPending()
+    if (root.handingOff) handoffTimer.restart()
+  }
+  Timer {
+    id: handoffTimer
+    interval: 4000
+    onTriggered: if (root.sessionActive) root.handingOff = false
+  }
+  // Back in front: a logind unlock (the usual way back) lifts the lock within
+  // moments; only if it does not, show the form.
+  Timer {
+    id: revealTimer
+    interval: 1500
+    onTriggered: if (root.sessionActive) root.handingOff = false
+  }
   function maybeOpenLogin() {
-    if (!root.lockToLogin || !sessionLock.locked || !root.sessionActive) return
-    if (Date.now() - root.shellStartedAt < 3000 || root.logindUnlockPending()) return
+    if (!root.handingOff || !sessionLock.locked || !root.sessionActive) return
     openLoginTimer.restart()
   }
   Connections {
@@ -201,6 +223,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   function handleSessionEvent(event) {
     if (event === "active") {
       root.sessionActive = true
+      if (root.handingOff) revealTimer.restart()
       if (root.lockRequested && root.fingerprintConfigured) {
         root.resumeFingerprint()
         Qt.callLater(root.startFingerprint)
@@ -280,6 +303,7 @@ rep("Service.qml", '''  property string pendingPassword: ""
   // replayed unlock is for).
   onLockRequestedChanged: {
     if (!root.lockRequested || !root.justStarted()) root.forgetLogindUnlock()
+    root.startHandoff()
   }
 
   Process {
@@ -324,6 +348,7 @@ rep("Service.qml", '''      color: Commons.Color.background
         otherUsers: root.otherUsers
         accounts: root.accounts
         avatarPath: root.avatarPath
+        handingOff: root.handingOff
         onSwitchUserRequested: function(name) { root.switchUser(name) }
 ''')
 rep("Service.qml", '''        loadBackground: root.locked
@@ -370,7 +395,7 @@ if not any(n == "passwordText" for _, n, _ in props) or not any(n == "submitPass
     raise SystemExit("LockView.qml: its interface no longer looks like a lock layout")
 
 OURS_PROPS = [("var", "currentUser", "({})"), ("var", "otherUsers", "[]"), ("var", "accounts", "[]"),
-              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true")]
+              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true"), ("bool", "handingOff", "false")]
 OURS_SIGNALS = [("switchUserRequested", "(string name)")]
 known = {n for _, n, _ in props}
 props += [p for p in OURS_PROPS if p[1] not in known]

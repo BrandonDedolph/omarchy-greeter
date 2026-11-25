@@ -41,6 +41,10 @@ Window {
         l.pw.submitted()
         console.warn("harness: rows=" + (l.accountRows ? l.accountRows.length : -1))
         l.switchUserRequested("sam")
+        view.handingOff = true
+        console.warn("harness: handoff-form=" + l.pw.visible)
+        view.handingOff = false
+        console.warn("harness: after-form=" + l.pw.visible)
       }
       console.warn("harness: events=" + win.events.join(","))
       var shot = Qt.application.arguments[Qt.application.arguments.length - 1]
