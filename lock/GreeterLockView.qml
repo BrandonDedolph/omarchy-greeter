@@ -360,6 +360,14 @@ Item {
   //    resets are over), and the password field has the keyboard.
   // If a switch does not happen, the screen comes back after a few seconds.
   property string leavingLabel: ""
+  // Timing of a switch in the journal (omarchy-shell), to tune it by.
+  function note(text) { console.log("omarchy lock " + new Date().toISOString() + " " + text) }
+  readonly property string myLabel: {
+    for (var i = 0; i < root.accountRows.length; i++)
+      if (root.accountRows[i].name === root.me) return root.accountRows[i].label
+    return root.me
+  }
+  NumberAnimation { id: arrivingText; target: curtainText; property: "opacity"; to: 1; duration: 200 }
   readonly property bool curtainDown: curtain.opacity > 0
   function leaveFor(name) {
     if (leaving.running || curtain.opacity > 0) return
@@ -377,7 +385,10 @@ Item {
       notSwitched.stop()
       curtain.opacity = 1
       curtainText.opacity = 0
+      arrivingText.stop()
       arrival.active = false
+      root.leavingLabel = ""
+      root.note("curtain: away")
     } else if (curtain.opacity > 0) {
       arrival.begin()
     }
@@ -415,30 +426,45 @@ Item {
     property bool active: false
     property real since: 0
     property int steady: 0
+    property int frames: 0
+    property real firstFrame: 0
+    property real longest: 0
     function begin() {
       arrival.since = Date.now()
       arrival.steady = 0
+      arrival.frames = 0
+      arrival.firstFrame = 0
+      arrival.longest = 0
       arrival.active = true
       arrivalCap.restart()
+      root.note("curtain: back")
     }
-    function done() {
+    function done(why) {
       if (!arrival.active) return
       arrival.active = false
       arrivalCap.stop()
+      root.note("curtain: lifting (" + why + ") after " + (Date.now() - arrival.since) + " ms; "
+        + arrival.frames + " frames, first at " + (arrival.firstFrame ? arrival.firstFrame - arrival.since : -1)
+        + " ms, longest gap " + Math.round(arrival.longest * 1000) + " ms")
       lifting.start()
     }
   }
   FrameAnimation {
     running: arrival.active
     onTriggered: {
-      arrival.steady = frameTime < 0.05 ? arrival.steady + 1 : 0
-      if (arrival.steady >= 20 && Date.now() - arrival.since >= 350) arrival.done()
+      if (++arrival.frames === 1) arrival.firstFrame = Date.now()
+      else arrival.longest = Math.max(arrival.longest, frameTime)
+      // The first frame's time spans the whole time away: not a gap.
+      arrival.steady = arrival.frames > 1 && frameTime < 0.05 ? arrival.steady + 1 : 0
+      if (arrival.steady >= 20 && Date.now() - arrival.since >= 350) arrival.done("steady")
+      // Text on the black while waiting, so it never looks stuck.
+      if (arrival.frames === 2) arrivingText.start()
     }
   }
   Timer {
     id: arrivalCap
     interval: 4000
-    onTriggered: arrival.done()
+    onTriggered: arrival.done("cap")
   }
   NumberAnimation {
     id: lifting
@@ -467,7 +493,7 @@ Item {
       anchors.centerIn: parent
       opacity: 0
       visible: root.extrasEnabled
-      text: "Switching to " + root.leavingLabel + "\u2026"
+      text: root.leavingLabel !== "" ? "Switching to " + root.leavingLabel + "\u2026" : "Welcome back, " + root.myLabel
       textFormat: Text.PlainText
       color: formStyle.alpha(formStyle.bright, 0.85)
       font.family: formStyle.fontFamily
