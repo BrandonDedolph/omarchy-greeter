@@ -332,6 +332,7 @@ rep("Service.qml", '''      color: Commons.Color.background
         sessionActive: root.sessionActive
         onSwitchUserRequested: function(name) { root.switchUser(name) }
         onPowerRequested: function(action) { root.requestPower(action) }
+        onArrived: function() { if (root.isPrimaryOutput(lockSurface.screen)) root.refocusAfterSwitch() }
         Connections {
           target: root
           function onRefocusRequested() { if (root.isPrimaryOutput(lockSurface.screen)) lockView.forcePasswordFocus() }
@@ -383,7 +384,8 @@ if not any(n == "passwordText" for _, n, _ in props) or not any(n == "submitPass
 OURS_PROPS = [("var", "currentUser", "({})"), ("var", "otherUsers", "[]"), ("var", "accounts", "[]"),
               ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true"),
               ("bool", "sessionActive", "true")]
-OURS_SIGNALS = [("switchUserRequested", "(string name)"), ("powerRequested", "(string action)")]
+OURS_SIGNALS = [("switchUserRequested", "(string name)"), ("powerRequested", "(string action)"),
+                ("arrived", "()")]
 known = {n for _, n, _ in props}
 props += [p for p in OURS_PROPS if p[1] not in known]
 known_signals = {n for n, _ in signals}

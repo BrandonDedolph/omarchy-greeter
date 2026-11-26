@@ -27,6 +27,7 @@ Window {
     onSubmitPassword: function(password) { win.note("submit:" + password) }
     onSwitchUserRequested: function(name) { win.note("switch:" + name) }
     onPowerRequested: function(action) { win.note("power:" + action) }
+    onArrived: win.note("arrived")
   }
 
   Timer {
@@ -110,7 +111,7 @@ Window {
     interval: 4800
     onTriggered: {
       var l = view.layout
-      console.warn("harness: back-curtain=" + l.curtainDown)
+      console.warn("harness: back-curtain=" + l.curtainDown + " " + win.events.join(","))
       win.finish(l)
     }
   }

@@ -49,6 +49,8 @@ Item {
   // Whether this session is the one on screen (the lock logic follows logind).
   property bool sessionActive: true
   signal switchUserRequested(string name)
+  // The picture is back after a switch: the session hands this screen the keyboard.
+  signal arrived()
   signal powerRequested(string action)      // suspend, reboot or poweroff
 
   property date now: new Date()
@@ -445,7 +447,10 @@ Item {
     to: 0
     duration: 320
     easing.type: Easing.InOutQuad
-    onStarted: root.forcePasswordFocus()
+    onStarted: {
+      root.forcePasswordFocus()
+      root.arrived()
+    }
   }
 
   Rectangle {
