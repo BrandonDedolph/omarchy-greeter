@@ -329,6 +329,7 @@ rep("Service.qml", '''      color: Commons.Color.background
         otherUsers: root.otherUsers
         accounts: root.accounts
         avatarPath: root.avatarPath
+        sessionActive: root.sessionActive
         onSwitchUserRequested: function(name) { root.switchUser(name) }
         onPowerRequested: function(action) { root.requestPower(action) }
         Connections {
@@ -380,7 +381,8 @@ if not any(n == "passwordText" for _, n, _ in props) or not any(n == "submitPass
     raise SystemExit("LockView.qml: its interface no longer looks like a lock layout")
 
 OURS_PROPS = [("var", "currentUser", "({})"), ("var", "otherUsers", "[]"), ("var", "accounts", "[]"),
-              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true")]
+              ("string", "avatarPath", '""'), ("bool", "extrasEnabled", "true"),
+              ("bool", "sessionActive", "true")]
 OURS_SIGNALS = [("switchUserRequested", "(string name)"), ("powerRequested", "(string action)")]
 known = {n for _, n, _ in props}
 props += [p for p in OURS_PROPS if p[1] not in known]

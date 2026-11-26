@@ -29,6 +29,9 @@ equal "our layout loads" "GreeterLockView.qml" "$(sed -n 's/^layout=//p' <<<"$ou
 equal "password passes in" "abc" "$(sed -n 's/^into-layout=//p' <<<"$out")"
 equal "every account listed" "3" "$(sed -n 's/^rows=//p' <<<"$out")"
 equal "Tab reaches 3 accounts then 3 power buttons, and stays" "kept,kept,kept,kept,kept,kept" "$(sed -n 's/^tab=//p' <<<"$out")"
+equal "switching: curtain first, then the switch" "chose,switch:sam curtain=true" "$(sed -n 's/^leaving=//p' <<<"$out")"
+equal "curtain stays down while away" "true" "$(sed -n 's/^away-curtain=//p' <<<"$out")"
+equal "curtain lifts on return" "false" "$(sed -n 's/^back-curtain=//p' <<<"$out")"
 equal "typing, submit, switch and power pass out" "edited:abcd,edited:,submit:abcd,switch:sam,power:suspend" "$(sed -n 's/^events=//p' <<<"$out")"
 
 # A layout that does not load: Omarchy's (here a stand-in that only needs

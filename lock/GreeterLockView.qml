@@ -46,6 +46,8 @@ Item {
   // Off on the black monitors, where the form is invisible but typing still
   // reaches the password field: nothing hidden may be clickable there.
   property bool extrasEnabled: true
+  // Whether this session is the one on screen (the lock logic follows logind).
+  property bool sessionActive: true
   signal switchUserRequested(string name)
   signal powerRequested(string action)      // suspend, reboot or poweroff
 
@@ -113,6 +115,8 @@ Item {
   Window.onActiveFocusItemChanged: Qt.callLater(restorePasswordFocus)
   onInputEnabledChanged: if (inputEnabled) Qt.callLater(forcePasswordFocus)
   Component.onCompleted: {
+    // Locked while out of sight (the guard): come back through the curtain.
+    if (!sessionActive) curtain.opacity = 1
     syncPasswordText()
     if (inputEnabled) Qt.callLater(forcePasswordFocus)
   }
@@ -280,7 +284,7 @@ Item {
       onChosen: (name) => {
         root.wakeRequested()
         if (name === root.me) root.forcePasswordFocus()
-        else root.switchUserRequested(name)
+        else root.leaveFor(name)
       }
       onTyped: (text) => {
         root.forcePasswordFocus()
@@ -339,4 +343,131 @@ Item {
       }
     }
   }
+
+  // ---- switching user ------------------------------------------------------
+  //
+  // Switching to another account hands the monitors to its session, and the
+  // monitors reset and re-sync on the way (about a second or two of no new
+  // picture, more on some monitors, nothing software can skip). So it is made
+  // to look intended, like Windows' "Switching user":
+  //  - leaving, the screen fades to black with "Switching to <name>" and the
+  //    switch happens on plain black, so this session's last picture is black
+  //    and coming back to it never shows a stale, frozen lock screen;
+  //  - out of sight, the curtain stays down;
+  //  - arriving, it lifts only once frames are flowing smoothly again (the
+  //    resets are over), and the password field has the keyboard.
+  // If a switch does not happen, the screen comes back after a few seconds.
+  property string leavingLabel: ""
+  readonly property bool curtainDown: curtain.opacity > 0
+  function leaveFor(name) {
+    if (leaving.running || curtain.opacity > 0) return
+    var label = name
+    for (var i = 0; i < root.accountRows.length; i++)
+      if (root.accountRows[i].name === name) label = root.accountRows[i].label
+    root.leavingLabel = label
+    leaving.target = name
+    leaving.start()
+  }
+  onSessionActiveChanged: {
+    if (!sessionActive) {
+      leaving.stop()
+      lifting.stop()
+      notSwitched.stop()
+      curtain.opacity = 1
+      curtainText.opacity = 0
+      arrival.active = false
+    } else if (curtain.opacity > 0) {
+      arrival.begin()
+    }
+  }
+
+  SequentialAnimation {
+    id: leaving
+    property string target: ""
+    ParallelAnimation {
+      NumberAnimation { target: curtain; property: "opacity"; to: 1; duration: 220; easing.type: Easing.OutCubic }
+      NumberAnimation { target: curtainText; property: "opacity"; to: 1; duration: 220 }
+    }
+    PauseAnimation { duration: 280 }
+    NumberAnimation { target: curtainText; property: "opacity"; to: 0; duration: 140 }
+    // One more frame of plain black before the switch.
+    PauseAnimation { duration: 60 }
+    ScriptAction {
+      script: {
+        root.switchUserRequested(leaving.target)
+        notSwitched.restart()
+      }
+    }
+  }
+  Timer {
+    id: notSwitched
+    interval: 3000
+    onTriggered: if (root.sessionActive) lifting.start()
+  }
+
+  // Frames flow at the monitor's rate once the resets are over; while one is
+  // under way, none arrive. Lift after a steady run of frames, or at most
+  // after a few seconds whatever happens.
+  QtObject {
+    id: arrival
+    property bool active: false
+    property real since: 0
+    property int steady: 0
+    function begin() {
+      arrival.since = Date.now()
+      arrival.steady = 0
+      arrival.active = true
+      arrivalCap.restart()
+    }
+    function done() {
+      if (!arrival.active) return
+      arrival.active = false
+      arrivalCap.stop()
+      lifting.start()
+    }
+  }
+  FrameAnimation {
+    running: arrival.active
+    onTriggered: {
+      arrival.steady = frameTime < 0.05 ? arrival.steady + 1 : 0
+      if (arrival.steady >= 20 && Date.now() - arrival.since >= 350) arrival.done()
+    }
+  }
+  Timer {
+    id: arrivalCap
+    interval: 4000
+    onTriggered: arrival.done()
+  }
+  NumberAnimation {
+    id: lifting
+    target: curtain
+    property: "opacity"
+    to: 0
+    duration: 320
+    easing.type: Easing.InOutQuad
+    onStarted: root.forcePasswordFocus()
+  }
+
+  Rectangle {
+    id: curtain
+    anchors.fill: parent
+    z: 1000
+    color: "#000000"
+    opacity: 0
+    visible: opacity > 0
+    // Nothing underneath is clickable while it is down.
+    MouseArea { anchors.fill: parent; hoverEnabled: true }
+    Text {
+      id: curtainText
+      anchors.centerIn: parent
+      opacity: 0
+      visible: root.extrasEnabled
+      text: "Switching to " + root.leavingLabel + "\u2026"
+      textFormat: Text.PlainText
+      color: formStyle.alpha(formStyle.bright, 0.85)
+      font.family: formStyle.fontFamily
+      font.pixelSize: 22 * formStyle.ui
+    }
+  }
+
 }

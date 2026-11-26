@@ -84,6 +84,33 @@ Window {
         return
       }
       console.warn("harness: tab=" + win.tabResults.join(","))
+      // Switching user: the curtain falls first, the switch comes after it.
+      win.events = []
+      l.leaveFor("sam")
+      win.note("chose")
+      switchStep.start()
+    }
+  }
+
+  Timer {
+    id: switchStep
+    interval: 1000
+    onTriggered: {
+      var l = view.layout
+      console.warn("harness: leaving=" + win.events.join(",") + " curtain=" + l.curtainDown)
+      // The other session takes the screen, then this one comes back.
+      view.sessionActive = false
+      console.warn("harness: away-curtain=" + l.curtainDown)
+      view.sessionActive = true
+      backStep.start()
+    }
+  }
+  Timer {
+    id: backStep
+    interval: 4800
+    onTriggered: {
+      var l = view.layout
+      console.warn("harness: back-curtain=" + l.curtainDown)
       win.finish(l)
     }
   }
