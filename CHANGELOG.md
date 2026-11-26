@@ -2,6 +2,14 @@
 
 What changed in each release, for the people using it. Newest first.
 
+## Unreleased
+
+- **Smooth switching between accounts.** Picking another account fades to
+  black with "Switching to <name>", the monitors reset out of sight, and the
+  lock screen fades in once the picture is steady again, ready for typing.
+  Before, the old picture froze and jumped while the monitors re-synced. It
+  works the same on any monitor.
+
 ## 1.1.0 (2026-11-25)
 
 ### Lock screen and login screen, like Windows
