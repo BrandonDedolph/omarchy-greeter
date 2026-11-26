@@ -6,7 +6,8 @@ What changed in each release, for the people using it. Newest first.
 
 - **Smooth switching between accounts.** Picking another account fades to
   black with "Switching to <name>", the monitors reset out of sight, and the
-  lock screen fades in once the picture is steady again, ready for typing.
+  lock screen fades in with "Welcome back" once the monitors have re-synced,
+  ready for typing.
   Before, the old picture froze and jumped while the monitors re-synced. It
   works the same on any monitor.
 
