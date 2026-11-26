@@ -2,7 +2,7 @@
 
 What changed in each release, for the people using it. Newest first.
 
-## Unreleased
+## 1.1.0 (2026-11-25)
 
 ### Lock screen and login screen, like Windows
 
