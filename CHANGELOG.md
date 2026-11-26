@@ -15,6 +15,8 @@ What changed in each release, for the people using it. Newest first.
   already signed in goes straight to its own lock screen, in a moment
   instead of seconds. Picking one that is not signed in opens the login
   screen with it selected.
+- **Type right away after switching back:** the password box has the
+  keyboard as soon as your lock screen is back in front.
 - **New look for the login screen:** the selected account centered, every
   account listed bottom-left, and your blurred wallpaper behind it.
 - **Shows who is signed in** using the system's own session list, so it is
