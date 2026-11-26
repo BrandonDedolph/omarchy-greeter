@@ -2,7 +2,7 @@
 
 What changed in each release, for the people using it. Newest first.
 
-## Unreleased
+## 1.1.1 (2026-11-25)
 
 - **Smooth switching between accounts.** Picking another account fades to
   black with "Switching to <name>", the monitors reset out of sight, and the
