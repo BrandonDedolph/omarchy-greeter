@@ -66,7 +66,7 @@ if [[ -d /etc/cryptsetup-keys.d ]] && [[ -n $(ls -A /etc/cryptsetup-keys.d 2>/de
   off "/etc/cryptsetup-keys.d holds key files"
 fi
 # FILES= in mkinitcpio's config, read the way mkinitcpio reads it (array or
-# string, one line or several).
+# string, one line or several), apart from files known to hold no key.
 # A sentinel proves the configs were read to the end; anything else (a
 # config that fails to source) counts as "maybe a key file".
 bundled=$(
@@ -76,7 +76,15 @@ bundled=$(
     # shellcheck disable=SC1090  # mkinitcpio's own configs, read as mkinitcpio does
     [[ -f $f ]] && source "$f" >/dev/null 2>&1 < /dev/null
   done
-  printf 'ok:%s' "${FILES[*]}" | tr -d '[:space:]'
+  # Files known to hold no key: Omarchy bundles the console keyboard layout
+  # (omarchy_hooks.conf) so the disk password is typed with the right one.
+  printf 'ok:'
+  for file in "${FILES[@]}"; do
+    case $file in
+      /etc/vconsole.conf) ;;
+      *) printf '%s' "$file" ;;
+    esac
+  done | tr -d '[:space:]'
 )
 [[ $bundled == "ok:" ]] || off "the initramfs bundles extra files (FILES=), possibly a key file"
 

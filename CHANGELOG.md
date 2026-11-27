@@ -2,6 +2,12 @@
 
 What changed in each release, for the people using it. Newest first.
 
+## Unreleased
+
+- **Fixed: one password at boot stopped working** after an Omarchy update
+  started including the keyboard layout file at startup. That file holds no
+  key, so it no longer turns the feature off.
+
 ## 1.1.1 (2026-11-25)
 
 - **Smooth switching between accounts.** Picking another account fades to
