@@ -7,7 +7,7 @@ mkdir -p "$cfg" "$fake"
 printf '#!/bin/bash\nprintf "%%s\\n" "$*" >> %q\n' "$asked" > "$fake/pkexec"
 printf '#!/bin/bash\nexit 0\n' > "$fake/notify-send"
 chmod +x "$fake"/*
-og() { HOME=$TMP XDG_CONFIG_HOME=$cfg OMARCHY_GREETER_CONF=$conf PATH=$fake:$PATH "$REPO/bin/omarchy-greeter" "$@" < /dev/null; }
+og() { HOME=$TMP XDG_CONFIG_HOME=$cfg OMARCHY_GREETER_CONF=$conf OMARCHY_GREETER_BOOT_STATUS=$TMP/no-boot-status PATH=$fake:$PATH "$REPO/bin/omarchy-greeter" "$@" < /dev/null; }
 menu=$cfg/omarchy/extensions/omarchy-menu.jsonc
 me=$(id -un)
 

@@ -36,6 +36,9 @@ set -euo pipefail
 CONF=/etc/omarchy-greeter.conf
 # Tests read a sample config; never as root (root steps always use /etc).
 if (( EUID != 0 )) && [[ -n ${OMARCHY_GREETER_CONF:-} ]]; then CONF=$OMARCHY_GREETER_CONF; fi
+# This boot's boot-unlock outcome (lib/boot-unlock-mark); tests point it elsewhere.
+BOOT_STATUS=/run/omarchy-greeter/boot-unlock-status
+if (( EUID != 0 )) && [[ -n ${OMARCHY_GREETER_BOOT_STATUS:-} ]]; then BOOT_STATUS=$OMARCHY_GREETER_BOOT_STATUS; fi
 DATA=/var/lib/omarchy-greeter
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-greeter"
 NO_PUBLISH="$USER_CONF/no-publish"
@@ -489,7 +492,7 @@ cmd_status() {
   echo "Login and lock forms on:     $(cmd_monitor)"
   local accounts boot_status
   accounts=$(boot_pass_accounts)
-  boot_status=$(head -c 200 /run/omarchy-greeter/boot-unlock-status 2>/dev/null || true)
+  boot_status=$(head -c 200 "$BOOT_STATUS" 2>/dev/null || true)
   local boot="off"
   [[ -n $accounts ]] && boot="on for ${accounts//,/, }"
   echo "One password at boot:        $boot${boot_status:+ (this boot: $boot_status)}"
