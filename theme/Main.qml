@@ -54,31 +54,6 @@ Rectangle {
     })
   }
 
-  // Straight in at boot: armed for just one account and nobody signed in yet
-  // (it is the first login after the disk password), so sign that account in
-  // as soon as everything is read, without waiting for Enter: the disk
-  // password was that person proving who they are moments ago. Tried once;
-  // if PAM says no, the screen is there as usual. Several accounts armed:
-  // nothing to guess, so it waits for a pick.
-  property bool autoTried: false
-  function tryAutoSignIn() {
-    if (autoTried || !showsUi || !settled || quiet || pendingReads > 0 || authenticating) return
-    if (bootAccounts.length !== 1) return
-    var index = -1
-    for (var i = 0; i < users.length; i++) {
-      var l = looks[users[i].name]
-      if (l && l.running) { autoTried = true; return }
-      if (users[i].name === bootAccounts[0]) index = i
-    }
-    if (index < 0) return
-    autoTried = true
-    if (index !== current) selectUser(index)
-    if (bootPassFor) login()
-  }
-  onSettledChanged: Qt.callLater(tryAutoSignIn)
-  onBootAccountsChanged: Qt.callLater(tryAutoSignIn)
-  onPendingReadsChanged: if (pendingReads === 0) Qt.callLater(tryAutoSignIn)
-
   Component.onCompleted: {
     readText(settingsFile, function(text) {
       var m = text.match(/^\s*primary\s*=\s*(\S*)/m)
@@ -526,8 +501,7 @@ Rectangle {
     faceIcon: root.user ? root.user.icon : ""
     status: root.userRunning ? "Signed in · locked" : ""
     statusGlyph: root.userRunning ? "" : ""
-    message: root.bootPassFor && !root.loginFailed
-      ? (root.authenticating ? "Signing in\u2026" : "Your disk password already unlocked this account") : ""
+    message: root.bootPassFor && !root.loginFailed ? "Your disk password already unlocked this account" : ""
 
     passwordBox.placeholder: root.loginFailed ? "Wrong password, try again"
       : (root.bootPassFor ? "Press Enter to sign in" : (root.userRunning ? "Password to unlock" : "Password"))

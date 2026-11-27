@@ -7,10 +7,6 @@ What changed in each release, for the people using it. Newest first.
 - **Fixed: one password at boot stopped working** after an Omarchy update
   started including the keyboard layout file at startup. That file holds no
   key, so it no longer turns the feature off.
-- **Straight to your desktop after the disk password:** when one password
-  at boot is on for just one account, the login screen signs that account in
-  by itself, without waiting for Enter. With several accounts it still lets
-  you pick.
 
 ## 1.1.1 (2026-11-25)
 

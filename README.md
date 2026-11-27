@@ -110,10 +110,10 @@ This puts back Omarchy's login screen and, for every account, Omarchy's lock scr
 
 ## One password at boot
 
-With Omarchy's full-disk encryption you type the disk password at boot and then an account password. With this on for your account, a disk password typed at boot also lets the **first** login skip the account password. When it is on for just one account, that account is signed in straight away, so the disk password takes you to your desktop; with several, the login screen waits for you to pick one and press Enter. It works:
+With Omarchy's full-disk encryption you type the disk password at boot and then an account password. With this on for your account, a disk password typed at boot also lets the **first** login skip the account password:
 
 - only for the accounts an admin turned it on for (`omarchy-greeter boot-pass on` turns it on for yours). Anyone who knows the disk password can use it, so on a shared computer turn it on only for the account of whoever owns the disk password;
-- only if `/` is on LUKS with no TPM or FIDO2 token and no key file (on the kernel command line, in `/etc/crypttab.initramfs`, in `/etc/cryptsetup-keys.d` or bundled into the initramfs; the keyboard layout Omarchy bundles is fine), so a typed passphrase was the only way the disk could have opened;
+- only if `/` is on LUKS with no TPM or FIDO2 token and no key file (on the kernel command line, in `/etc/crypttab.initramfs`, in `/etc/cryptsetup-keys.d` or bundled into the initramfs), so a typed passphrase was the only way the disk could have opened;
 - only if SDDM does not log anyone in automatically;
 - only for an account that could also log in with its password (not locked, a real login shell);
 - only for a fresh boot (not a soft-reboot), within 10 minutes of boot, and only for the **first** login of the boot: once anyone has signed in, by the login screen or on a console, it is gone;
